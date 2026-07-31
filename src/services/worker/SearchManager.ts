@@ -137,7 +137,7 @@ export class SearchManager {
     const searchSessions = !type || type === 'sessions';
     const searchPrompts = !type || type === 'prompts';
 
-    // PATH 1: FILTER-ONLY (no query text) - Skip Chroma/FTS5, use direct SQLite filtering
+    // PATH 1: FILTER-ONLY (no query text) - Skip Chroma, use direct SQLite filtering
     // This path enables date filtering which Chroma cannot do (requires direct SQLite access)
     if (!query) {
       logger.debug('SEARCH', 'Filter-only query (no query text), using direct SQLite filtering', { enablesDateFilters: true });
@@ -256,8 +256,8 @@ export class SearchManager {
 
         logger.debug('SEARCH', 'Hydrated results from SQLite', { observations: observations.length, sessions: sessions.length, prompts: prompts.length });
       } else {
-        // Chroma returned 0 results - this is the correct answer, don't fall back to FTS5
-        logger.debug('SEARCH', 'ChromaDB found no matches (final result, no FTS5 fallback)', {});
+        // Chroma returned 0 results - this is the correct answer, no keyword fallback
+        logger.debug('SEARCH', 'ChromaDB found no matches (final result)', {});
       }
     }
     // ChromaDB not initialized - mark as failed to show proper error message

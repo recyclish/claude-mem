@@ -11,7 +11,7 @@ export {
 // @deprecated Use modular functions from Database.ts instead
 export { SessionStore } from './SessionStore.js';
 
-// Export session search (FTS5 and structured search)
+// Export session search (structured filter queries; vector search lives in ChromaDB)
 export { SessionSearch } from './SessionSearch.js';
 
 // Export types

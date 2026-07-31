@@ -38,6 +38,7 @@ export class MigrationRunner {
     this.createObservationFeedbackTable();
     this.addSessionPlatformSourceColumn();
     this.ensureMergedIntoProjectColumns();
+    this.dropLegacyFTSInfrastructure();
   }
 
   /**
@@ -377,7 +378,7 @@ export class MigrationRunner {
   }
 
   /**
-   * Create user_prompts table with FTS5 support (migration 10)
+   * Create user_prompts table (migration 10)
    */
   private createUserPromptsTable(): void {
     // Check if migration already applied
@@ -392,7 +393,7 @@ export class MigrationRunner {
       return;
     }
 
-    logger.debug('DB', 'Creating user_prompts table with FTS5 support');
+    logger.debug('DB', 'Creating user_prompts table');
 
     // Begin transaction
     this.db.run('BEGIN TRANSACTION');
@@ -414,40 +415,6 @@ export class MigrationRunner {
       CREATE INDEX idx_user_prompts_prompt_number ON user_prompts(prompt_number);
       CREATE INDEX idx_user_prompts_lookup ON user_prompts(content_session_id, prompt_number);
     `);
-
-    // Create FTS5 virtual table — skip if FTS5 is unavailable (e.g., Bun on Windows #791).
-    // The user_prompts table itself is still created; only FTS indexing is skipped.
-    try {
-      this.db.run(`
-        CREATE VIRTUAL TABLE user_prompts_fts USING fts5(
-          prompt_text,
-          content='user_prompts',
-          content_rowid='id'
-        );
-      `);
-
-      // Create triggers to sync FTS5
-      this.db.run(`
-        CREATE TRIGGER user_prompts_ai AFTER INSERT ON user_prompts BEGIN
-          INSERT INTO user_prompts_fts(rowid, prompt_text)
-          VALUES (new.id, new.prompt_text);
-        END;
-
-        CREATE TRIGGER user_prompts_ad AFTER DELETE ON user_prompts BEGIN
-          INSERT INTO user_prompts_fts(user_prompts_fts, rowid, prompt_text)
-          VALUES('delete', old.id, old.prompt_text);
-        END;
-
-        CREATE TRIGGER user_prompts_au AFTER UPDATE ON user_prompts BEGIN
-          INSERT INTO user_prompts_fts(user_prompts_fts, rowid, prompt_text)
-          VALUES('delete', old.id, old.prompt_text);
-          INSERT INTO user_prompts_fts(rowid, prompt_text)
-          VALUES (new.id, new.prompt_text);
-        END;
-      `);
-    } catch (ftsError) {
-      logger.warn('DB', 'FTS5 not available — user_prompts_fts skipped (search uses ChromaDB)', {}, ftsError as Error);
-    }
 
     // Commit transaction
     this.db.run('COMMIT');
@@ -661,7 +628,7 @@ export class MigrationRunner {
       // ===================================
       // 1. Recreate observations table
       // ===================================
-      // Drop FTS triggers first (they reference the observations table)
+      // Drop legacy FTS triggers first (they reference the observations table)
       this.db.run('DROP TRIGGER IF EXISTS observations_ai');
       this.db.run('DROP TRIGGER IF EXISTS observations_ad');
       this.db.run('DROP TRIGGER IF EXISTS observations_au');
@@ -710,29 +677,6 @@ export class MigrationRunner {
         CREATE INDEX idx_observations_created ON observations(created_at_epoch DESC);
       `);
 
-      // Recreate FTS triggers only if observations_fts exists
-      const hasFTS = (this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='observations_fts'").all() as { name: string }[]).length > 0;
-      if (hasFTS) {
-        this.db.run(`
-          CREATE TRIGGER IF NOT EXISTS observations_ai AFTER INSERT ON observations BEGIN
-            INSERT INTO observations_fts(rowid, title, subtitle, narrative, text, facts, concepts)
-            VALUES (new.id, new.title, new.subtitle, new.narrative, new.text, new.facts, new.concepts);
-          END;
-
-          CREATE TRIGGER IF NOT EXISTS observations_ad AFTER DELETE ON observations BEGIN
-            INSERT INTO observations_fts(observations_fts, rowid, title, subtitle, narrative, text, facts, concepts)
-            VALUES('delete', old.id, old.title, old.subtitle, old.narrative, old.text, old.facts, old.concepts);
-          END;
-
-          CREATE TRIGGER IF NOT EXISTS observations_au AFTER UPDATE ON observations BEGIN
-            INSERT INTO observations_fts(observations_fts, rowid, title, subtitle, narrative, text, facts, concepts)
-            VALUES('delete', old.id, old.title, old.subtitle, old.narrative, old.text, old.facts, old.concepts);
-            INSERT INTO observations_fts(rowid, title, subtitle, narrative, text, facts, concepts)
-            VALUES (new.id, new.title, new.subtitle, new.narrative, new.text, new.facts, new.concepts);
-          END;
-        `);
-      }
-
       // ===================================
       // 2. Recreate session_summaries table
       // ===================================
@@ -768,7 +712,7 @@ export class MigrationRunner {
         FROM session_summaries
       `);
 
-      // Drop session_summaries FTS triggers before dropping the table
+      // Drop legacy session_summaries FTS triggers before dropping the table
       this.db.run('DROP TRIGGER IF EXISTS session_summaries_ai');
       this.db.run('DROP TRIGGER IF EXISTS session_summaries_ad');
       this.db.run('DROP TRIGGER IF EXISTS session_summaries_au');
@@ -782,29 +726,6 @@ export class MigrationRunner {
         CREATE INDEX idx_session_summaries_project ON session_summaries(project);
         CREATE INDEX idx_session_summaries_created ON session_summaries(created_at_epoch DESC);
       `);
-
-      // Recreate session_summaries FTS triggers if FTS table exists
-      const hasSummariesFTS = (this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='session_summaries_fts'").all() as { name: string }[]).length > 0;
-      if (hasSummariesFTS) {
-        this.db.run(`
-          CREATE TRIGGER IF NOT EXISTS session_summaries_ai AFTER INSERT ON session_summaries BEGIN
-            INSERT INTO session_summaries_fts(rowid, request, investigated, learned, completed, next_steps, notes)
-            VALUES (new.id, new.request, new.investigated, new.learned, new.completed, new.next_steps, new.notes);
-          END;
-
-          CREATE TRIGGER IF NOT EXISTS session_summaries_ad AFTER DELETE ON session_summaries BEGIN
-            INSERT INTO session_summaries_fts(session_summaries_fts, rowid, request, investigated, learned, completed, next_steps, notes)
-            VALUES('delete', old.id, old.request, old.investigated, old.learned, old.completed, old.next_steps, old.notes);
-          END;
-
-          CREATE TRIGGER IF NOT EXISTS session_summaries_au AFTER UPDATE ON session_summaries BEGIN
-            INSERT INTO session_summaries_fts(session_summaries_fts, rowid, request, investigated, learned, completed, next_steps, notes)
-            VALUES('delete', old.id, old.request, old.investigated, old.learned, old.completed, old.next_steps, old.notes);
-            INSERT INTO session_summaries_fts(rowid, request, investigated, learned, completed, next_steps, notes)
-            VALUES (new.id, new.request, new.investigated, new.learned, new.completed, new.next_steps, new.notes);
-          END;
-        `);
-      }
 
       // Record migration
       this.db.prepare('INSERT OR IGNORE INTO schema_versions (version, applied_at) VALUES (?, ?)').run(21, new Date().toISOString());
@@ -951,5 +872,45 @@ export class MigrationRunner {
     this.db.run(
       'CREATE INDEX IF NOT EXISTS idx_summaries_merged_into ON session_summaries(merged_into_project)'
     );
+  }
+
+  /**
+   * Drop legacy FTS5 tables and sync triggers.
+   *
+   * FTS5 search was replaced by ChromaDB (vector search) and direct SQLite
+   * filtering; the tables were only kept synchronized for backward
+   * compatibility. Self-idempotent via DROP ... IF EXISTS — does NOT bump
+   * schema_versions.
+   */
+  private dropLegacyFTSInfrastructure(): void {
+    // Sync triggers reference the FTS tables, so drop them first
+    this.db.run(`
+      DROP TRIGGER IF EXISTS observations_ai;
+      DROP TRIGGER IF EXISTS observations_ad;
+      DROP TRIGGER IF EXISTS observations_au;
+      DROP TRIGGER IF EXISTS session_summaries_ai;
+      DROP TRIGGER IF EXISTS session_summaries_ad;
+      DROP TRIGGER IF EXISTS session_summaries_au;
+      DROP TRIGGER IF EXISTS user_prompts_ai;
+      DROP TRIGGER IF EXISTS user_prompts_ad;
+      DROP TRIGGER IF EXISTS user_prompts_au;
+    `);
+
+    const ftsTables = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('observations_fts', 'session_summaries_fts', 'user_prompts_fts')"
+    ).all() as TableNameRow[];
+
+    if (ftsTables.length === 0) return;
+
+    logger.debug('DB', 'Dropping legacy FTS5 tables (search uses ChromaDB)');
+    for (const { name } of ftsTables) {
+      try {
+        this.db.run(`DROP TABLE IF EXISTS ${name}`);
+      } catch (error) {
+        // Dropping a virtual table fails when the FTS5 module is unavailable
+        // (e.g., Bun on Windows #791) — harmless to leave the table in place.
+        logger.warn('DB', `Could not drop legacy FTS5 table ${name}`, {}, error as Error);
+      }
+    }
   }
 }
