@@ -16,6 +16,7 @@ dist/
 .claude/worktrees/
 plugin/data/
 plugin/data.backup/
+plugin/.cli-installed
 package-lock.json
 bun.lock
 private/
