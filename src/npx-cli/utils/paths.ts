@@ -144,12 +144,6 @@ export function ensureDirectoryExists(directoryPath: string): void {
   }
 }
 
-/**
- * @deprecated Use `readJsonSafe` from `../../utils/json-utils.js` instead.
- * Kept as re-export for backward compatibility.
- */
-export { readJsonSafe } from '../../utils/json-utils.js';
-
 export function writeJsonFileAtomic(filepath: string, data: any): void {
   ensureDirectoryExists(dirname(filepath));
   writeFileSync(filepath, JSON.stringify(data, null, 2) + '\n', 'utf-8');
