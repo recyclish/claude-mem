@@ -180,6 +180,42 @@ export class SearchOrchestrator {
   }
 
   /**
+   * Semantic search restricted to an observation type (e.g. decisions with query text)
+   */
+  async searchByType(query: string, type: string, args: any): Promise<StrategySearchResult> {
+    const options = this.normalizeParams(args);
+
+    if (this.hybridStrategy) {
+      return await this.hybridStrategy.searchByType(query, type, options);
+    }
+
+    // Fallback to SQLite
+    const results = this.sqliteStrategy.findByType(type, options);
+    return {
+      results: { observations: results, sessions: [], prompts: [] },
+      usedChroma: false,
+      fellBack: false,
+      strategy: 'sqlite'
+    };
+  }
+
+  /**
+   * Rank an already-filtered candidate id set by semantic relevance to a query.
+   * Returns [] when Chroma is unavailable or has no overlapping matches —
+   * callers fall back to their own metadata-ordered results.
+   */
+  async rankObservations(
+    candidateIds: number[],
+    rankQuery: string,
+    hydrateLimit: number
+  ): Promise<ObservationSearchResult[]> {
+    if (!this.hybridStrategy) {
+      return [];
+    }
+    return await this.hybridStrategy.rankObservations(candidateIds, rankQuery, hydrateLimit);
+  }
+
+  /**
    * Get timeline around anchor
    */
   getTimeline(

@@ -256,6 +256,94 @@ export class HybridSearchStrategy extends BaseSearchStrategy implements SearchSt
   }
 
   /**
+   * Semantic search restricted to an observation type.
+   * Pattern: Chroma query with a type where-filter -> Hydrate with filters -> Chroma rank order
+   *
+   * Fetches up to 2x the requested limit of candidates so hydration-side
+   * filters (project, dateRange) have headroom before the limit applies.
+   */
+  async searchByType(
+    query: string,
+    type: string,
+    options: StrategySearchOptions
+  ): Promise<StrategySearchResult> {
+    const limit = options.limit || SEARCH_CONSTANTS.DEFAULT_LIMIT;
+
+    try {
+      logger.debug('SEARCH', 'HybridSearchStrategy: searchByType', { query, type });
+
+      const chromaResults = await this.chromaSync.queryChroma(
+        query,
+        Math.min(limit * 2, SEARCH_CONSTANTS.CHROMA_BATCH_SIZE),
+        { type }
+      );
+      const obsIds = chromaResults.ids;
+
+      if (obsIds.length > 0) {
+        const observations = this.sessionStore.getObservationsByIds(obsIds, { ...options, type } as any);
+        // Preserve Chroma ranking order
+        observations.sort((a, b) => obsIds.indexOf(a.id) - obsIds.indexOf(b.id));
+
+        return {
+          results: { observations, sessions: [], prompts: [] },
+          usedChroma: true,
+          fellBack: false,
+          strategy: 'hybrid'
+        };
+      }
+
+      return this.emptyResult('hybrid');
+
+    } catch (error) {
+      logger.error('SEARCH', 'HybridSearchStrategy: searchByType failed', {}, error as Error);
+      // Fall back to metadata-only results
+      const results = this.sessionSearch.findByType(type as any, options);
+      return {
+        results: { observations: results, sessions: [], prompts: [] },
+        usedChroma: false,
+        fellBack: true,
+        strategy: 'hybrid'
+      };
+    }
+  }
+
+  /**
+   * Rank an already-filtered candidate id set by semantic relevance to a query,
+   * then hydrate the survivors in rank order. Returns [] when Chroma has no
+   * overlapping matches or the query fails — callers fall back to their own
+   * metadata-ordered results.
+   */
+  async rankObservations(
+    candidateIds: number[],
+    rankQuery: string,
+    hydrateLimit: number
+  ): Promise<ObservationSearchResult[]> {
+    if (candidateIds.length === 0) {
+      return [];
+    }
+
+    try {
+      const chromaResults = await this.chromaSync.queryChroma(
+        rankQuery,
+        Math.min(candidateIds.length, SEARCH_CONSTANTS.CHROMA_BATCH_SIZE)
+      );
+
+      const rankedIds = this.intersectWithRanking(candidateIds, chromaResults.ids);
+      if (rankedIds.length === 0) {
+        return [];
+      }
+
+      const observations = this.sessionStore.getObservationsByIds(rankedIds, { limit: hydrateLimit });
+      observations.sort((a, b) => rankedIds.indexOf(a.id) - rankedIds.indexOf(b.id));
+      return observations;
+
+    } catch (error) {
+      logger.error('SEARCH', 'HybridSearchStrategy: rankObservations failed', {}, error as Error);
+      return [];
+    }
+  }
+
+  /**
    * Intersect metadata IDs with Chroma IDs, preserving Chroma's rank order
    */
   private intersectWithRanking(metadataIds: number[], chromaIds: number[]): number[] {
