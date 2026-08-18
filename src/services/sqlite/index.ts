@@ -1,9 +1,6 @@
 // Export main components
 export {
   ClaudeMemDatabase,
-  DatabaseManager,
-  getDatabase,
-  initializeDatabase,
   MigrationRunner
 } from './Database.js';
 
@@ -16,9 +13,6 @@ export { SessionSearch } from './SessionSearch.js';
 
 // Export types
 export * from './types.js';
-
-// Export migrations
-export { migrations } from './migrations.js';
 
 // Export transactions
 export { storeObservations, storeObservationsAndMarkComplete } from './transactions.js';
