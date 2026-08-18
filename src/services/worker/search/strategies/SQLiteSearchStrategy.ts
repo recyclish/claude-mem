@@ -106,16 +106,16 @@ export class SQLiteSearchStrategy extends BaseSearchStrategy implements SearchSt
    * Find observations by concept (used by findByConcept tool)
    */
   findByConcept(concept: string, options: StrategySearchOptions): ObservationSearchResult[] {
-    const { limit = SEARCH_CONSTANTS.DEFAULT_LIMIT, project, dateRange, orderBy = 'date_desc' } = options;
-    return this.sessionSearch.findByConcept(concept, { limit, project, dateRange, orderBy });
+    // SessionSearch overrides the concepts key and ignores unknown keys,
+    // so passing options through applies every supported filter.
+    return this.sessionSearch.findByConcept(concept, options);
   }
 
   /**
    * Find observations by type (used by findByType tool)
    */
   findByType(type: string | string[], options: StrategySearchOptions): ObservationSearchResult[] {
-    const { limit = SEARCH_CONSTANTS.DEFAULT_LIMIT, project, dateRange, orderBy = 'date_desc' } = options;
-    return this.sessionSearch.findByType(type as any, { limit, project, dateRange, orderBy });
+    return this.sessionSearch.findByType(type as any, options);
   }
 
   /**
@@ -125,7 +125,6 @@ export class SQLiteSearchStrategy extends BaseSearchStrategy implements SearchSt
     observations: ObservationSearchResult[];
     sessions: SessionSummarySearchResult[];
   } {
-    const { limit = SEARCH_CONSTANTS.DEFAULT_LIMIT, project, dateRange, orderBy = 'date_desc' } = options;
-    return this.sessionSearch.findByFile(filePath, { limit, project, dateRange, orderBy });
+    return this.sessionSearch.findByFile(filePath, options);
   }
 }

@@ -65,14 +65,15 @@ export class HybridSearchStrategy extends BaseSearchStrategy implements SearchSt
     concept: string,
     options: StrategySearchOptions
   ): Promise<StrategySearchResult> {
-    const { limit = SEARCH_CONSTANTS.DEFAULT_LIMIT, project, dateRange, orderBy } = options;
-    const filterOptions = { limit, project, dateRange, orderBy };
+    // Pass options through: SessionSearch overrides the concepts key itself and
+    // ignores keys it doesn't know, so extra filters (type, files, offset) apply.
+    const hydrateLimit = options.limit || SEARCH_CONSTANTS.DEFAULT_LIMIT;
 
     try {
       logger.debug('SEARCH', 'HybridSearchStrategy: findByConcept', { concept });
 
       // Step 1: SQLite metadata filter
-      const metadataResults = this.sessionSearch.findByConcept(concept, filterOptions);
+      const metadataResults = this.sessionSearch.findByConcept(concept, options);
       logger.debug('SEARCH', 'HybridSearchStrategy: Found metadata matches', {
         count: metadataResults.length
       });
@@ -96,7 +97,7 @@ export class HybridSearchStrategy extends BaseSearchStrategy implements SearchSt
 
       // Step 4: Hydrate in semantic rank order
       if (rankedIds.length > 0) {
-        const observations = this.sessionStore.getObservationsByIds(rankedIds, { limit });
+        const observations = this.sessionStore.getObservationsByIds(rankedIds, { limit: hydrateLimit });
         // Restore semantic ranking order
         observations.sort((a, b) => rankedIds.indexOf(a.id) - rankedIds.indexOf(b.id));
 
@@ -113,7 +114,7 @@ export class HybridSearchStrategy extends BaseSearchStrategy implements SearchSt
     } catch (error) {
       logger.error('SEARCH', 'HybridSearchStrategy: findByConcept failed', {}, error as Error);
       // Fall back to metadata-only results
-      const results = this.sessionSearch.findByConcept(concept, filterOptions);
+      const results = this.sessionSearch.findByConcept(concept, options);
       return {
         results: { observations: results, sessions: [], prompts: [] },
         usedChroma: false,
@@ -130,15 +131,16 @@ export class HybridSearchStrategy extends BaseSearchStrategy implements SearchSt
     type: string | string[],
     options: StrategySearchOptions
   ): Promise<StrategySearchResult> {
-    const { limit = SEARCH_CONSTANTS.DEFAULT_LIMIT, project, dateRange, orderBy } = options;
-    const filterOptions = { limit, project, dateRange, orderBy };
+    // Pass options through: SessionSearch overrides the type key itself and
+    // ignores keys it doesn't know, so extra filters (concepts, files, offset) apply.
+    const hydrateLimit = options.limit || SEARCH_CONSTANTS.DEFAULT_LIMIT;
     const typeStr = Array.isArray(type) ? type.join(', ') : type;
 
     try {
       logger.debug('SEARCH', 'HybridSearchStrategy: findByType', { type: typeStr });
 
       // Step 1: SQLite metadata filter
-      const metadataResults = this.sessionSearch.findByType(type as any, filterOptions);
+      const metadataResults = this.sessionSearch.findByType(type as any, options);
       logger.debug('SEARCH', 'HybridSearchStrategy: Found metadata matches', {
         count: metadataResults.length
       });
@@ -162,7 +164,7 @@ export class HybridSearchStrategy extends BaseSearchStrategy implements SearchSt
 
       // Step 4: Hydrate in rank order
       if (rankedIds.length > 0) {
-        const observations = this.sessionStore.getObservationsByIds(rankedIds, { limit });
+        const observations = this.sessionStore.getObservationsByIds(rankedIds, { limit: hydrateLimit });
         observations.sort((a, b) => rankedIds.indexOf(a.id) - rankedIds.indexOf(b.id));
 
         return {
@@ -177,7 +179,7 @@ export class HybridSearchStrategy extends BaseSearchStrategy implements SearchSt
 
     } catch (error) {
       logger.error('SEARCH', 'HybridSearchStrategy: findByType failed', {}, error as Error);
-      const results = this.sessionSearch.findByType(type as any, filterOptions);
+      const results = this.sessionSearch.findByType(type as any, options);
       return {
         results: { observations: results, sessions: [], prompts: [] },
         usedChroma: false,
@@ -198,14 +200,15 @@ export class HybridSearchStrategy extends BaseSearchStrategy implements SearchSt
     sessions: SessionSummarySearchResult[];
     usedChroma: boolean;
   }> {
-    const { limit = SEARCH_CONSTANTS.DEFAULT_LIMIT, project, dateRange, orderBy } = options;
-    const filterOptions = { limit, project, dateRange, orderBy };
+    // Pass options through: SessionSearch overrides the files key itself and
+    // ignores keys it doesn't know, so extra filters (type, isFolder, offset) apply.
+    const hydrateLimit = options.limit || SEARCH_CONSTANTS.DEFAULT_LIMIT;
 
     try {
       logger.debug('SEARCH', 'HybridSearchStrategy: findByFile', { filePath });
 
       // Step 1: SQLite metadata filter
-      const metadataResults = this.sessionSearch.findByFile(filePath, filterOptions);
+      const metadataResults = this.sessionSearch.findByFile(filePath, options);
       logger.debug('SEARCH', 'HybridSearchStrategy: Found file matches', {
         observations: metadataResults.observations.length,
         sessions: metadataResults.sessions.length
@@ -233,7 +236,7 @@ export class HybridSearchStrategy extends BaseSearchStrategy implements SearchSt
 
       // Step 4: Hydrate in rank order
       if (rankedIds.length > 0) {
-        const observations = this.sessionStore.getObservationsByIds(rankedIds, { limit });
+        const observations = this.sessionStore.getObservationsByIds(rankedIds, { limit: hydrateLimit });
         observations.sort((a, b) => rankedIds.indexOf(a.id) - rankedIds.indexOf(b.id));
 
         return { observations, sessions, usedChroma: true };
@@ -243,7 +246,7 @@ export class HybridSearchStrategy extends BaseSearchStrategy implements SearchSt
 
     } catch (error) {
       logger.error('SEARCH', 'HybridSearchStrategy: findByFile failed', {}, error as Error);
-      const results = this.sessionSearch.findByFile(filePath, filterOptions);
+      const results = this.sessionSearch.findByFile(filePath, options);
       return {
         observations: results.observations,
         sessions: results.sessions,
