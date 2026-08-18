@@ -269,7 +269,7 @@ npm run build
 
 ### Modifying Database Schema
 
-1. Add migration to `src/services/sqlite/migrations.ts`:
+1. Add a migration method to `src/services/sqlite/migrations/runner.ts` (and mirror it in `SessionStore.ts`):
 
 ```typescript
 export const migration011: Migration = {
@@ -358,7 +358,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 ```typescript
 yourNewSearch(params: YourParams): SearchResult[] {
-  // Implement FTS5 search
+  // Implement the structured SQLite query
 }
 ```
 

@@ -42,7 +42,7 @@ graph TB
         API --> DB[Database Manager]
 
         AGENT -->|Event-Driven| CLAUDE[Claude Agent SDK]
-        CLAUDE --> SQLITE[(SQLite + FTS5)]
+        CLAUDE --> SQLITE[(SQLite + Chroma)]
         CLAUDE --> CHROMA[(Chroma Vectors)]
     end
 
@@ -950,6 +950,6 @@ For developers implementing this pattern on other platforms:
 ## Related Documentation
 
 - [Worker Service](/architecture/worker-service) - HTTP API and async processing
-- [Database Schema](/architecture/database) - SQLite tables and FTS5 search
+- [Database Schema](/architecture/database) - SQLite tables and search
 - [Privacy Tags](/usage/private-tags) - Using `<private>` tags
 - [Troubleshooting](/troubleshooting) - Common hook issues

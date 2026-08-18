@@ -15,9 +15,9 @@ Claude-mem uses an **MCP-based search architecture** that provides intelligent m
 1. **MCP Tools** (4 tools) - `search`, `timeline`, `get_observations`, `__IMPORTANT`
 2. **MCP Server** (`plugin/scripts/mcp-server.cjs`) - Thin wrapper over HTTP API
 3. **HTTP API Endpoints** - Fast search operations on Worker Service (port 37777)
-4. **Worker Service** - Express.js server with FTS5 full-text search
-5. **SQLite Database** - Persistent storage with FTS5 virtual tables
-6. **Chroma Vector DB** - Semantic search with hybrid retrieval
+4. **Worker Service** - Express.js server with the SearchOrchestrator search pipeline
+5. **SQLite Database** - Persistent storage with structured filter queries
+6. **Chroma Vector DB** - Semantic search for query text
 
 **Token Efficiency**: ~10x savings through 3-layer workflow pattern
 
@@ -62,13 +62,14 @@ const response = await fetch(url);
 
 ### 4. Worker Processing
 
-Worker service executes FTS5 query:
+Worker service runs the search through the SearchOrchestrator: query text goes
+to ChromaDB for semantic ranking, results are filtered by recency/date range,
+then hydrated from SQLite with any structured filters applied:
 
 ```sql
-SELECT * FROM observations_fts
-WHERE observations_fts MATCH ?
+SELECT * FROM observations
+WHERE id IN (/* Chroma-ranked ids */)
 AND type = 'bugfix'
-ORDER BY rank
 LIMIT 10
 ```
 
@@ -243,18 +244,17 @@ GET  /api/health           # Health check
 ```
 
 **Database Access:**
-- Uses `SessionSearch` service for FTS5 queries
-- Uses `SessionStore` for structured queries
-- Hybrid search with ChromaDB for semantic similarity
+- Uses `SessionSearch` service for filter-only structured queries
+- Uses `SessionStore` for hydration by id
+- ChromaDB vector search for semantic similarity on query text
 
-**FTS5 Full-Text Search:**
+**Filter-Only Search (no query text):**
 ```typescript
-// search tool → HTTP GET → FTS5 query
-SELECT * FROM observations_fts
-WHERE observations_fts MATCH ?
-AND type = ?
-AND date >= ? AND date <= ?
-ORDER BY rank
+// search tool → HTTP GET → direct SQLite query
+SELECT * FROM observations
+WHERE type = ?
+AND created_at_epoch >= ? AND created_at_epoch <= ?
+ORDER BY created_at_epoch DESC
 LIMIT ? OFFSET ?
 ```
 
@@ -385,17 +385,13 @@ MCP server is automatically configured via plugin installation. No manual setup 
 
 ## Security
 
-### FTS5 Injection Prevention
+### SQL Injection Prevention
 
-All search queries are escaped before FTS5 processing:
+All structured filters are bound as SQLite parameters — user input is never
+interpolated into SQL text — and query text is only ever passed to ChromaDB
+as an embedding input, not executed.
 
-```typescript
-function escapeFTS5Query(query: string): string {
-  return query.replace(/"/g, '""');
-}
-```
-
-**Testing:** 332 injection attack tests covering special characters, SQL keywords, quote escaping, and boolean operators.
+**Testing:** injection attack tests cover special characters, SQL keywords, quote escaping, and boolean operators.
 
 ### MCP Protocol Security
 
@@ -405,7 +401,7 @@ function escapeFTS5Query(query: string): string {
 
 ## Performance
 
-**FTS5 Full-Text Search:** Sub-10ms for typical queries
+**Filter-Only Search:** Sub-10ms direct SQLite queries; semantic search adds a ChromaDB round-trip
 
 **MCP Overhead:** Minimal - simple protocol translation
 
@@ -494,4 +490,4 @@ npm run worker:logs         # View logs
 - [Memory Search Usage](/usage/search-tools) - User guide with examples
 - [Progressive Disclosure](/progressive-disclosure) - Philosophy behind 3-layer workflow
 - [Worker Service Architecture](/architecture/worker-service) - HTTP API details
-- [Database Schema](/architecture/database) - FTS5 tables and indexes
+- [Database Schema](/architecture/database) - Tables and indexes
