@@ -20,6 +20,7 @@ import {
   UserPromptSearchResult
 } from '../types.js';
 import { SessionSearch } from '../../../sqlite/SessionSearch.js';
+import { AppError } from '../../../server/ErrorHandler.js';
 import { logger } from '../../../../utils/logger.js';
 
 export class SQLiteSearchStrategy extends BaseSearchStrategy implements SearchStrategy {
@@ -97,6 +98,12 @@ export class SQLiteSearchStrategy extends BaseSearchStrategy implements SearchSt
       };
 
     } catch (error) {
+      if (error instanceof AppError) {
+        // Validation error (e.g. neither query nor filters provided) — the API
+        // contract returns 400, so let it propagate instead of masking it as
+        // an empty result.
+        throw error;
+      }
       logger.error('SEARCH', 'SQLiteSearchStrategy: Search failed', {}, error as Error);
       return this.emptyResult('sqlite');
     }
