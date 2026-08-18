@@ -897,36 +897,15 @@ export class SearchManager {
    * Tool handler: search_observations
    */
   async searchObservations(args: any): Promise<any> {
-    const normalized = this.normalizeParams(args);
-    const { query, ...options } = normalized;
-    let results: ObservationSearchResult[] = [];
+    const query = args?.query;
 
-    // Vector-first search via ChromaDB
-    if (this.chromaSync) {
-      logger.debug('SEARCH', 'Using hybrid semantic search (Chroma + SQLite)', {});
-
-      // Step 1: Chroma semantic search (top 100)
-      const chromaResults = await this.queryChroma(query, 100);
-      logger.debug('SEARCH', 'Chroma returned semantic matches', { matchCount: chromaResults.ids.length });
-
-      if (chromaResults.ids.length > 0) {
-        // Step 2: Filter by recency (90 days)
-        const ninetyDaysAgo = Date.now() - SEARCH_CONSTANTS.RECENCY_WINDOW_MS;
-        const recentIds = chromaResults.ids.filter((_id, idx) => {
-          const meta = chromaResults.metadatas[idx];
-          return meta && meta.created_at_epoch > ninetyDaysAgo;
-        });
-
-        logger.debug('SEARCH', 'Results within 90-day window', { count: recentIds.length });
-
-        // Step 3: Hydrate from SQLite in temporal order
-        if (recentIds.length > 0) {
-          const limit = options.limit || 20;
-          results = this.sessionStore.getObservationsByIds(recentIds, { orderBy: 'date_desc', limit });
-          logger.debug('SEARCH', 'Hydrated observations from SQLite', { count: results.length });
-        }
-      }
-    }
+    // Semantic search via the orchestrator (ChromaSearchStrategy).
+    // This endpoint returns semantic matches only, so a non-Chroma fallback
+    // result (Chroma unavailable or failed) is treated as no matches.
+    const strategyResult = await this.orchestrator.search({ ...args, searchType: 'observations' });
+    const results: ObservationSearchResult[] = strategyResult.usedChroma
+      ? strategyResult.results.observations
+      : [];
 
     if (results.length === 0) {
       return {
@@ -954,36 +933,15 @@ export class SearchManager {
    * Tool handler: search_sessions
    */
   async searchSessions(args: any): Promise<any> {
-    const normalized = this.normalizeParams(args);
-    const { query, ...options } = normalized;
-    let results: SessionSummarySearchResult[] = [];
+    const query = args?.query;
 
-    // Vector-first search via ChromaDB
-    if (this.chromaSync) {
-      logger.debug('SEARCH', 'Using hybrid semantic search for sessions', {});
-
-      // Step 1: Chroma semantic search (top 100)
-      const chromaResults = await this.queryChroma(query, 100, { doc_type: 'session_summary' });
-      logger.debug('SEARCH', 'Chroma returned semantic matches for sessions', { matchCount: chromaResults.ids.length });
-
-      if (chromaResults.ids.length > 0) {
-        // Step 2: Filter by recency (90 days)
-        const ninetyDaysAgo = Date.now() - SEARCH_CONSTANTS.RECENCY_WINDOW_MS;
-        const recentIds = chromaResults.ids.filter((_id, idx) => {
-          const meta = chromaResults.metadatas[idx];
-          return meta && meta.created_at_epoch > ninetyDaysAgo;
-        });
-
-        logger.debug('SEARCH', 'Results within 90-day window', { count: recentIds.length });
-
-        // Step 3: Hydrate from SQLite in temporal order
-        if (recentIds.length > 0) {
-          const limit = options.limit || 20;
-          results = this.sessionStore.getSessionSummariesByIds(recentIds, { orderBy: 'date_desc', limit });
-          logger.debug('SEARCH', 'Hydrated sessions from SQLite', { count: results.length });
-        }
-      }
-    }
+    // Semantic search via the orchestrator (ChromaSearchStrategy).
+    // This endpoint returns semantic matches only, so a non-Chroma fallback
+    // result (Chroma unavailable or failed) is treated as no matches.
+    const strategyResult = await this.orchestrator.search({ ...args, searchType: 'sessions' });
+    const results: SessionSummarySearchResult[] = strategyResult.usedChroma
+      ? strategyResult.results.sessions
+      : [];
 
     if (results.length === 0) {
       return {
