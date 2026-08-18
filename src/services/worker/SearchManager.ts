@@ -27,8 +27,7 @@ import { ModeManager } from '../domain/ModeManager.js';
 
 import {
   SearchOrchestrator,
-  TimelineBuilder,
-  SEARCH_CONSTANTS
+  TimelineBuilder
 } from './search/index.js';
 import type { TimelineData } from './search/index.js';
 
@@ -50,21 +49,6 @@ export class SearchManager {
       chromaSync
     );
     this.timelineBuilder = new TimelineBuilder();
-  }
-
-  /**
-   * Query Chroma vector database via ChromaSync
-   * @deprecated Use orchestrator.search() instead
-   */
-  private async queryChroma(
-    query: string,
-    limit: number,
-    whereFilter?: Record<string, any>
-  ): Promise<{ ids: number[]; distances: number[]; metadatas: any[] }> {
-    if (!this.chromaSync) {
-      return { ids: [], distances: [], metadatas: [] };
-    }
-    return await this.chromaSync.queryChroma(query, limit, whereFilter);
   }
 
   /**
@@ -153,111 +137,26 @@ export class SearchManager {
       }
     }
     // PATH 2: CHROMA SEMANTIC SEARCH (query text + Chroma available)
+    // Delegated to the orchestrator (ChromaSearchStrategy): scoped Chroma query
+    // -> date-range/recency filter -> categorize by doc type -> hydrate with filters
     else if (this.chromaSync) {
-      let chromaSucceeded = false;
       logger.debug('SEARCH', 'Using ChromaDB semantic search', { typeFilter: type || 'all' });
 
-      // Build Chroma where filter for doc_type and project
-      let whereFilter: Record<string, any> | undefined;
-      if (type === 'observations') {
-        whereFilter = { doc_type: 'observation' };
-      } else if (type === 'sessions') {
-        whereFilter = { doc_type: 'session_summary' };
-      } else if (type === 'prompts') {
-        whereFilter = { doc_type: 'user_prompt' };
-      }
+      const strategyResult = await this.orchestrator.search({
+        ...options,
+        query,
+        searchType: type || 'all',
+        obsType: obs_type,
+        concepts,
+        files
+      });
 
-      // Include project in the Chroma where clause to scope vector search.
-      // Without this, larger projects dominate the top-N results and smaller
-      // projects get crowded out before the post-hoc SQLite filter.
-      // Match both native-provenance rows (project) and adopted merged-worktree
-      // rows (merged_into_project) so a parent-project query surfaces its
-      // merged children's observations too.
-      if (options.project) {
-        const projectFilter = {
-          $or: [
-            { project: options.project },
-            { merged_into_project: options.project }
-          ]
-        };
-        whereFilter = whereFilter
-          ? { $and: [whereFilter, projectFilter] }
-          : projectFilter;
-      }
-
-      // Step 1: Chroma semantic search with optional type + project filter
-      const chromaResults = await this.queryChroma(query, 100, whereFilter);
-      chromaSucceeded = true; // Chroma didn't throw error
-      logger.debug('SEARCH', 'ChromaDB returned semantic matches', { matchCount: chromaResults.ids.length });
-
-      if (chromaResults.ids.length > 0) {
-        // Step 2: Filter by date range
-        // Use user-provided dateRange if available, otherwise fall back to 90-day recency window
-        const { dateRange } = options;
-        let startEpoch: number | undefined;
-        let endEpoch: number | undefined;
-
-        if (dateRange) {
-          if (dateRange.start) {
-            startEpoch = typeof dateRange.start === 'number'
-              ? dateRange.start
-              : new Date(dateRange.start).getTime();
-          }
-          if (dateRange.end) {
-            endEpoch = typeof dateRange.end === 'number'
-              ? dateRange.end
-              : new Date(dateRange.end).getTime();
-          }
-        } else {
-          // Default: 90-day recency window
-          startEpoch = Date.now() - SEARCH_CONSTANTS.RECENCY_WINDOW_MS;
-        }
-
-        const recentMetadata = chromaResults.metadatas.map((meta, idx) => ({
-          id: chromaResults.ids[idx],
-          meta,
-          isRecent: meta && meta.created_at_epoch != null
-            && (!startEpoch || meta.created_at_epoch >= startEpoch)
-            && (!endEpoch || meta.created_at_epoch <= endEpoch)
-        })).filter(item => item.isRecent);
-
-        logger.debug('SEARCH', dateRange ? 'Results within user date range' : 'Results within 90-day window', { count: recentMetadata.length });
-
-        // Step 3: Categorize IDs by document type
-        const obsIds: number[] = [];
-        const sessionIds: number[] = [];
-        const promptIds: number[] = [];
-
-        for (const item of recentMetadata) {
-          const docType = item.meta?.doc_type;
-          if (docType === 'observation' && searchObservations) {
-            obsIds.push(item.id);
-          } else if (docType === 'session_summary' && searchSessions) {
-            sessionIds.push(item.id);
-          } else if (docType === 'user_prompt' && searchPrompts) {
-            promptIds.push(item.id);
-          }
-        }
-
-        logger.debug('SEARCH', 'Categorized results by type', { observations: obsIds.length, sessions: sessionIds.length, prompts: prompts.length });
-
-        // Step 4: Hydrate from SQLite with additional filters
-        if (obsIds.length > 0) {
-          // Apply obs_type, concepts, files filters if provided
-          const obsOptions = { ...options, type: obs_type, concepts, files };
-          observations = this.sessionStore.getObservationsByIds(obsIds, obsOptions);
-        }
-        if (sessionIds.length > 0) {
-          sessions = this.sessionStore.getSessionSummariesByIds(sessionIds, { orderBy: 'date_desc', limit: options.limit, project: options.project });
-        }
-        if (promptIds.length > 0) {
-          prompts = this.sessionStore.getUserPromptsByIds(promptIds, { orderBy: 'date_desc', limit: options.limit, project: options.project });
-        }
-
-        logger.debug('SEARCH', 'Hydrated results from SQLite', { observations: observations.length, sessions: sessions.length, prompts: prompts.length });
+      if (strategyResult.usedChroma) {
+        ({ observations, sessions, prompts } = strategyResult.results);
       } else {
-        // Chroma returned 0 results - this is the correct answer, no keyword fallback
-        logger.debug('SEARCH', 'ChromaDB found no matches (final result)', {});
+        // Chroma query failed mid-flight — semantic search unavailable.
+        // No keyword fallback: this endpoint returns semantic matches only.
+        chromaFailed = true;
       }
     }
     // ChromaDB not initialized - mark as failed to show proper error message
@@ -439,24 +338,17 @@ export class SearchManager {
       let results: ObservationSearchResult[] = [];
 
       if (this.chromaSync) {
-        try {
-          logger.debug('SEARCH', 'Using hybrid semantic search for timeline query', {});
-          const chromaResults = await this.queryChroma(query, 100);
-          logger.debug('SEARCH', 'Chroma returned semantic matches for timeline', { matchCount: chromaResults?.ids?.length ?? 0 });
-
-          if (chromaResults?.ids && chromaResults.ids.length > 0) {
-            const ninetyDaysAgo = Date.now() - SEARCH_CONSTANTS.RECENCY_WINDOW_MS;
-            const recentIds = chromaResults.ids.filter((_id, idx) => {
-              const meta = chromaResults.metadatas[idx];
-              return meta && meta.created_at_epoch > ninetyDaysAgo;
-            });
-
-            if (recentIds.length > 0) {
-              results = this.sessionStore.getObservationsByIds(recentIds, { orderBy: 'date_desc', limit: 1 });
-            }
-          }
-        } catch (chromaError) {
-          logger.error('SEARCH', 'Chroma search failed for timeline, continuing without semantic results', {}, chromaError as Error);
+        logger.debug('SEARCH', 'Using hybrid semantic search for timeline query', {});
+        // Most recent semantic match within the recency window becomes the anchor.
+        // A Chroma failure yields usedChroma=false — continue without semantic results.
+        const strategyResult = await this.orchestrator.search({
+          query,
+          searchType: 'observations',
+          limit: 1,
+          orderBy: 'date_desc'
+        });
+        if (strategyResult.usedChroma) {
+          results = strategyResult.results.observations;
         }
       }
 
@@ -687,44 +579,22 @@ export class SearchManager {
     const { query, ...filters } = normalized;
     let results: ObservationSearchResult[] = [];
 
-    // Search for decision-type observations
+    // Search for decision-type observations via the orchestrator
     if (this.chromaSync) {
-      try {
-        if (query) {
-          // Semantic search filtered to decision type
-          logger.debug('SEARCH', 'Using Chroma semantic search with type=decision filter', {});
-          const chromaResults = await this.queryChroma(query, Math.min((filters.limit || 20) * 2, 100), { type: 'decision' });
-          const obsIds = chromaResults.ids;
-
-          if (obsIds.length > 0) {
-            results = this.sessionStore.getObservationsByIds(obsIds, { ...filters, type: 'decision' });
-            // Preserve Chroma ranking order
-            results.sort((a, b) => obsIds.indexOf(a.id) - obsIds.indexOf(b.id));
-          }
-        } else {
-          // No query: get all decisions, rank by "decision" keyword
-          logger.debug('SEARCH', 'Using metadata-first + semantic ranking for decisions', {});
-          const metadataResults = this.sessionSearch.findByType('decision', filters);
-
-          if (metadataResults.length > 0) {
-            const ids = metadataResults.map(obs => obs.id);
-            const chromaResults = await this.queryChroma('decision', Math.min(ids.length, 100));
-
-            const rankedIds: number[] = [];
-            for (const chromaId of chromaResults.ids) {
-              if (ids.includes(chromaId) && !rankedIds.includes(chromaId)) {
-                rankedIds.push(chromaId);
-              }
-            }
-
-            if (rankedIds.length > 0) {
-              results = this.sessionStore.getObservationsByIds(rankedIds, { limit: filters.limit || 20 });
-              results.sort((a, b) => rankedIds.indexOf(a.id) - rankedIds.indexOf(b.id));
-            }
-          }
+      if (query) {
+        // Semantic search filtered to decision type
+        logger.debug('SEARCH', 'Using Chroma semantic search with type=decision filter', {});
+        const strategyResult = await this.orchestrator.searchByType(query, 'decision', filters);
+        if (strategyResult.usedChroma) {
+          results = strategyResult.results.observations;
         }
-      } catch (chromaError) {
-        logger.error('SEARCH', 'Chroma search failed for decisions, falling back to metadata search', {}, chromaError as Error);
+      } else {
+        // No query: get all decisions, rank by "decision" keyword
+        logger.debug('SEARCH', 'Using metadata-first + semantic ranking for decisions', {});
+        const strategyResult = await this.orchestrator.findByType('decision', filters);
+        if (strategyResult.usedChroma) {
+          results = strategyResult.results.observations;
+        }
       }
     }
 
@@ -763,36 +633,25 @@ export class SearchManager {
 
     // Search for change-type observations and change-related concepts
     if (this.chromaSync) {
-      try {
-        logger.debug('SEARCH', 'Using hybrid search for change-related observations', {});
+      logger.debug('SEARCH', 'Using hybrid search for change-related observations', {});
 
-        // Get all observations with type="change" or concepts containing change
-        const typeResults = this.sessionSearch.findByType('change', filters);
-        const conceptChangeResults = this.sessionSearch.findByConcept('change', filters);
-        const conceptWhatChangedResults = this.sessionSearch.findByConcept('what-changed', filters);
+      // Get all observations with type="change" or concepts containing change
+      const typeResults = this.sessionSearch.findByType('change', filters);
+      const conceptChangeResults = this.sessionSearch.findByConcept('change', filters);
+      const conceptWhatChangedResults = this.sessionSearch.findByConcept('what-changed', filters);
 
-        // Combine and deduplicate
-        const allIds = new Set<number>();
-        [...typeResults, ...conceptChangeResults, ...conceptWhatChangedResults].forEach(obs => allIds.add(obs.id));
+      // Combine and deduplicate
+      const allIds = new Set<number>();
+      [...typeResults, ...conceptChangeResults, ...conceptWhatChangedResults].forEach(obs => allIds.add(obs.id));
 
-        if (allIds.size > 0) {
-          const idsArray = Array.from(allIds);
-          const chromaResults = await this.queryChroma('what changed', Math.min(idsArray.length, 100));
-
-          const rankedIds: number[] = [];
-          for (const chromaId of chromaResults.ids) {
-            if (idsArray.includes(chromaId) && !rankedIds.includes(chromaId)) {
-              rankedIds.push(chromaId);
-            }
-          }
-
-          if (rankedIds.length > 0) {
-            results = this.sessionStore.getObservationsByIds(rankedIds, { limit: filters.limit || 20 });
-            results.sort((a, b) => rankedIds.indexOf(a.id) - rankedIds.indexOf(b.id));
-          }
-        }
-      } catch (chromaError) {
-        logger.error('SEARCH', 'Chroma search failed for changes, falling back to metadata search', {}, chromaError as Error);
+      if (allIds.size > 0) {
+        // Rank the candidate set by semantic relevance; [] on failure falls
+        // through to the metadata-ordered fallback below
+        results = await this.orchestrator.rankObservations(
+          Array.from(allIds),
+          'what changed',
+          filters.limit || 20
+        );
       }
     }
 
@@ -850,20 +709,13 @@ export class SearchManager {
       const metadataResults = this.sessionSearch.findByConcept('how-it-works', filters);
 
       if (metadataResults.length > 0) {
-        const ids = metadataResults.map(obs => obs.id);
-        const chromaResults = await this.queryChroma('how it works architecture', Math.min(ids.length, 100));
-
-        const rankedIds: number[] = [];
-        for (const chromaId of chromaResults.ids) {
-          if (ids.includes(chromaId) && !rankedIds.includes(chromaId)) {
-            rankedIds.push(chromaId);
-          }
-        }
-
-        if (rankedIds.length > 0) {
-          results = this.sessionStore.getObservationsByIds(rankedIds, { limit: filters.limit || 20 });
-          results.sort((a, b) => rankedIds.indexOf(a.id) - rankedIds.indexOf(b.id));
-        }
+        // Rank the candidate set by semantic relevance; [] on failure falls
+        // through to the metadata-ordered fallback below
+        results = await this.orchestrator.rankObservations(
+          metadataResults.map(obs => obs.id),
+          'how it works architecture',
+          filters.limit || 20
+        );
       }
     }
 
@@ -969,36 +821,15 @@ export class SearchManager {
    * Tool handler: search_user_prompts
    */
   async searchUserPrompts(args: any): Promise<any> {
-    const normalized = this.normalizeParams(args);
-    const { query, ...options } = normalized;
-    let results: UserPromptSearchResult[] = [];
+    const query = args?.query;
 
-    // Vector-first search via ChromaDB
-    if (this.chromaSync) {
-      logger.debug('SEARCH', 'Using hybrid semantic search for user prompts', {});
-
-      // Step 1: Chroma semantic search (top 100)
-      const chromaResults = await this.queryChroma(query, 100, { doc_type: 'user_prompt' });
-      logger.debug('SEARCH', 'Chroma returned semantic matches for prompts', { matchCount: chromaResults.ids.length });
-
-      if (chromaResults.ids.length > 0) {
-        // Step 2: Filter by recency (90 days)
-        const ninetyDaysAgo = Date.now() - SEARCH_CONSTANTS.RECENCY_WINDOW_MS;
-        const recentIds = chromaResults.ids.filter((_id, idx) => {
-          const meta = chromaResults.metadatas[idx];
-          return meta && meta.created_at_epoch > ninetyDaysAgo;
-        });
-
-        logger.debug('SEARCH', 'Results within 90-day window', { count: recentIds.length });
-
-        // Step 3: Hydrate from SQLite in temporal order
-        if (recentIds.length > 0) {
-          const limit = options.limit || 20;
-          results = this.sessionStore.getUserPromptsByIds(recentIds, { orderBy: 'date_desc', limit });
-          logger.debug('SEARCH', 'Hydrated user prompts from SQLite', { count: results.length });
-        }
-      }
-    }
+    // Semantic search via the orchestrator (ChromaSearchStrategy).
+    // This endpoint returns semantic matches only, so a non-Chroma fallback
+    // result (Chroma unavailable or failed) is treated as no matches.
+    const strategyResult = await this.orchestrator.search({ ...args, searchType: 'prompts' });
+    const results: UserPromptSearchResult[] = strategyResult.usedChroma
+      ? strategyResult.results.prompts
+      : [];
 
     if (results.length === 0) {
       return {
@@ -1548,23 +1379,16 @@ export class SearchManager {
     // Use hybrid search if available
     if (this.chromaSync) {
       logger.debug('SEARCH', 'Using hybrid semantic search for timeline query', {});
-      const chromaResults = await this.queryChroma(query, 100);
-      logger.debug('SEARCH', 'Chroma returned semantic matches for timeline', { matchCount: chromaResults.ids.length });
-
-      if (chromaResults.ids.length > 0) {
-        // Filter by recency (90 days)
-        const ninetyDaysAgo = Date.now() - SEARCH_CONSTANTS.RECENCY_WINDOW_MS;
-        const recentIds = chromaResults.ids.filter((_id, idx) => {
-          const meta = chromaResults.metadatas[idx];
-          return meta && meta.created_at_epoch > ninetyDaysAgo;
-        });
-
-        logger.debug('SEARCH', 'Results within 90-day window', { count: recentIds.length });
-
-        if (recentIds.length > 0) {
-          results = this.sessionStore.getObservationsByIds(recentIds, { orderBy: 'date_desc', limit: mode === 'auto' ? 1 : limit });
-          logger.debug('SEARCH', 'Hydrated observations from SQLite', { count: results.length });
-        }
+      // Most recent semantic matches within the recency window become anchors.
+      // A Chroma failure yields usedChroma=false — fall through to "no results".
+      const strategyResult = await this.orchestrator.search({
+        query,
+        searchType: 'observations',
+        limit: mode === 'auto' ? 1 : limit,
+        orderBy: 'date_desc'
+      });
+      if (strategyResult.usedChroma) {
+        results = strategyResult.results.observations;
       }
     }
 
