@@ -34,6 +34,7 @@ src/ui/viewer.html
 .claude-octopus/
 .claude/session-intent.md
 .claude/session-plan.md
+.claude/scheduled_tasks.lock
 .octo/
 
 # Local contribution analysis (not part of upstream)
