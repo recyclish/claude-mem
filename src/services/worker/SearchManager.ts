@@ -116,57 +116,27 @@ export class SearchManager {
     let prompts: UserPromptSearchResult[] = [];
     let chromaFailed = false;
 
-    // Determine which types to query based on type filter
-    const searchObservations = !type || type === 'observations';
-    const searchSessions = !type || type === 'sessions';
-    const searchPrompts = !type || type === 'prompts';
+    // Delegate to the orchestrator: filter-only requests (no query text) use
+    // direct SQLite filtering (enables date filters), query text uses Chroma
+    // semantic search. Validation errors (neither query nor filters) propagate
+    // to the route as a 400.
+    logger.debug('SEARCH', query ? 'Using ChromaDB semantic search' : 'Filter-only query, using direct SQLite filtering', { typeFilter: type || 'all' });
+    const strategyResult = await this.orchestrator.search({
+      ...options,
+      query,
+      searchType: type || 'all',
+      obsType: obs_type,
+      concepts,
+      files
+    });
 
-    // PATH 1: FILTER-ONLY (no query text) - Skip Chroma, use direct SQLite filtering
-    // This path enables date filtering which Chroma cannot do (requires direct SQLite access)
-    if (!query) {
-      logger.debug('SEARCH', 'Filter-only query (no query text), using direct SQLite filtering', { enablesDateFilters: true });
-      const obsOptions = { ...options, type: obs_type, concepts, files };
-      if (searchObservations) {
-        observations = this.sessionSearch.searchObservations(undefined, obsOptions);
-      }
-      if (searchSessions) {
-        sessions = this.sessionSearch.searchSessions(undefined, options);
-      }
-      if (searchPrompts) {
-        prompts = this.sessionSearch.searchUserPrompts(undefined, options);
-      }
-    }
-    // PATH 2: CHROMA SEMANTIC SEARCH (query text + Chroma available)
-    // Delegated to the orchestrator (ChromaSearchStrategy): scoped Chroma query
-    // -> date-range/recency filter -> categorize by doc type -> hydrate with filters
-    else if (this.chromaSync) {
-      logger.debug('SEARCH', 'Using ChromaDB semantic search', { typeFilter: type || 'all' });
-
-      const strategyResult = await this.orchestrator.search({
-        ...options,
-        query,
-        searchType: type || 'all',
-        obsType: obs_type,
-        concepts,
-        files
-      });
-
-      if (strategyResult.usedChroma) {
-        ({ observations, sessions, prompts } = strategyResult.results);
-      } else {
-        // Chroma query failed mid-flight — semantic search unavailable.
-        // No keyword fallback: this endpoint returns semantic matches only.
-        chromaFailed = true;
-      }
-    }
-    // ChromaDB not initialized - mark as failed to show proper error message
-    else if (query) {
+    if (!query || strategyResult.usedChroma) {
+      ({ observations, sessions, prompts } = strategyResult.results);
+    } else {
+      // Semantic query but Chroma is unavailable or failed mid-flight.
+      // No keyword fallback: this endpoint returns semantic matches only.
       chromaFailed = true;
-      logger.debug('SEARCH', 'ChromaDB not initialized - semantic search unavailable', {});
-      logger.debug('SEARCH', 'Install UVX/Python to enable vector search', { url: 'https://docs.astral.sh/uv/getting-started/installation/' });
-      observations = [];
-      sessions = [];
-      prompts = [];
+      logger.debug('SEARCH', 'ChromaDB unavailable - semantic search failed', {});
     }
 
     const totalResults = observations.length + sessions.length + prompts.length;
