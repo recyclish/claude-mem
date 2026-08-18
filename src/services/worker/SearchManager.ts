@@ -1070,41 +1070,13 @@ export class SearchManager {
   async findByConcept(args: any): Promise<any> {
     const normalized = this.normalizeParams(args);
     const { concepts: concept, ...filters } = normalized;
-    let results: ObservationSearchResult[] = [];
 
-    // Metadata-first, semantic-enhanced search
-    if (this.chromaSync) {
-      logger.debug('SEARCH', 'Using metadata-first + semantic ranking for concept search', {});
+    // Metadata-first, semantic-enhanced search via the orchestrator
+    // (HybridSearchStrategy when Chroma is available, SQLite otherwise)
+    const strategyResult = await this.orchestrator.findByConcept(concept, filters);
+    let results: ObservationSearchResult[] = strategyResult.results.observations;
 
-      // Step 1: SQLite metadata filter (get all IDs with this concept)
-      const metadataResults = this.sessionSearch.findByConcept(concept, filters);
-      logger.debug('SEARCH', 'Found observations with concept', { concept, count: metadataResults.length });
-
-      if (metadataResults.length > 0) {
-        // Step 2: Chroma semantic ranking (rank by relevance to concept)
-        const ids = metadataResults.map(obs => obs.id);
-        const chromaResults = await this.queryChroma(concept, Math.min(ids.length, 100));
-
-        // Intersect: Keep only IDs that passed metadata filter, in semantic rank order
-        const rankedIds: number[] = [];
-        for (const chromaId of chromaResults.ids) {
-          if (ids.includes(chromaId) && !rankedIds.includes(chromaId)) {
-            rankedIds.push(chromaId);
-          }
-        }
-
-        logger.debug('SEARCH', 'Chroma ranked results by semantic relevance', { count: rankedIds.length });
-
-        // Step 3: Hydrate in semantic rank order
-        if (rankedIds.length > 0) {
-          results = this.sessionStore.getObservationsByIds(rankedIds, { limit: filters.limit || 20 });
-          // Restore semantic ranking order
-          results.sort((a, b) => rankedIds.indexOf(a.id) - rankedIds.indexOf(b.id));
-        }
-      }
-    }
-
-    // Fall back to SQLite-only if Chroma unavailable or failed
+    // Fall back to SQLite-only if the hybrid path returned nothing
     if (results.length === 0) {
       logger.debug('SEARCH', 'Using SQLite-only concept search', {});
       results = this.sessionSearch.findByConcept(concept, filters);
@@ -1140,46 +1112,14 @@ export class SearchManager {
     const { files: rawFilePath, ...filters } = normalized;
     // Handle both string and array (normalizeParams may split on comma)
     const filePath = Array.isArray(rawFilePath) ? rawFilePath[0] : rawFilePath;
-    let observations: ObservationSearchResult[] = [];
-    let sessions: SessionSummarySearchResult[] = [];
 
-    // Metadata-first, semantic-enhanced search for observations
-    if (this.chromaSync) {
-      logger.debug('SEARCH', 'Using metadata-first + semantic ranking for file search', {});
+    // Metadata-first, semantic-enhanced search via the orchestrator
+    // (HybridSearchStrategy when Chroma is available, SQLite otherwise)
+    const strategyResult = await this.orchestrator.findByFile(filePath, filters);
+    let observations: ObservationSearchResult[] = strategyResult.observations;
+    let sessions: SessionSummarySearchResult[] = strategyResult.sessions;
 
-      // Step 1: SQLite metadata filter (get all results with this file)
-      const metadataResults = this.sessionSearch.findByFile(filePath, filters);
-      logger.debug('SEARCH', 'Found results for file', { file: filePath, observations: metadataResults.observations.length, sessions: metadataResults.sessions.length });
-
-      // Sessions: Keep as-is (already summarized, no semantic ranking needed)
-      sessions = metadataResults.sessions;
-
-      // Observations: Apply semantic ranking
-      if (metadataResults.observations.length > 0) {
-        // Step 2: Chroma semantic ranking (rank by relevance to file path)
-        const ids = metadataResults.observations.map(obs => obs.id);
-        const chromaResults = await this.queryChroma(filePath, Math.min(ids.length, 100));
-
-        // Intersect: Keep only IDs that passed metadata filter, in semantic rank order
-        const rankedIds: number[] = [];
-        for (const chromaId of chromaResults.ids) {
-          if (ids.includes(chromaId) && !rankedIds.includes(chromaId)) {
-            rankedIds.push(chromaId);
-          }
-        }
-
-        logger.debug('SEARCH', 'Chroma ranked observations by semantic relevance', { count: rankedIds.length });
-
-        // Step 3: Hydrate in semantic rank order
-        if (rankedIds.length > 0) {
-          observations = this.sessionStore.getObservationsByIds(rankedIds, { limit: filters.limit || 20 });
-          // Restore semantic ranking order
-          observations.sort((a, b) => rankedIds.indexOf(a.id) - rankedIds.indexOf(b.id));
-        }
-      }
-    }
-
-    // Fall back to SQLite-only if Chroma unavailable or failed
+    // Fall back to SQLite-only if the hybrid path returned nothing
     if (observations.length === 0 && sessions.length === 0) {
       logger.debug('SEARCH', 'Using SQLite-only file search', {});
       const results = this.sessionSearch.findByFile(filePath, filters);
@@ -1261,41 +1201,13 @@ export class SearchManager {
     const normalized = this.normalizeParams(args);
     const { type, ...filters } = normalized;
     const typeStr = Array.isArray(type) ? type.join(', ') : type;
-    let results: ObservationSearchResult[] = [];
 
-    // Metadata-first, semantic-enhanced search
-    if (this.chromaSync) {
-      logger.debug('SEARCH', 'Using metadata-first + semantic ranking for type search', {});
+    // Metadata-first, semantic-enhanced search via the orchestrator
+    // (HybridSearchStrategy when Chroma is available, SQLite otherwise)
+    const strategyResult = await this.orchestrator.findByType(type, filters);
+    let results: ObservationSearchResult[] = strategyResult.results.observations;
 
-      // Step 1: SQLite metadata filter (get all IDs with this type)
-      const metadataResults = this.sessionSearch.findByType(type, filters);
-      logger.debug('SEARCH', 'Found observations with type', { type: typeStr, count: metadataResults.length });
-
-      if (metadataResults.length > 0) {
-        // Step 2: Chroma semantic ranking (rank by relevance to type)
-        const ids = metadataResults.map(obs => obs.id);
-        const chromaResults = await this.queryChroma(typeStr, Math.min(ids.length, 100));
-
-        // Intersect: Keep only IDs that passed metadata filter, in semantic rank order
-        const rankedIds: number[] = [];
-        for (const chromaId of chromaResults.ids) {
-          if (ids.includes(chromaId) && !rankedIds.includes(chromaId)) {
-            rankedIds.push(chromaId);
-          }
-        }
-
-        logger.debug('SEARCH', 'Chroma ranked results by semantic relevance', { count: rankedIds.length });
-
-        // Step 3: Hydrate in semantic rank order
-        if (rankedIds.length > 0) {
-          results = this.sessionStore.getObservationsByIds(rankedIds, { limit: filters.limit || 20 });
-          // Restore semantic ranking order
-          results.sort((a, b) => rankedIds.indexOf(a.id) - rankedIds.indexOf(b.id));
-        }
-      }
-    }
-
-    // Fall back to SQLite-only if Chroma unavailable or failed
+    // Fall back to SQLite-only if the hybrid path returned nothing
     if (results.length === 0) {
       logger.debug('SEARCH', 'Using SQLite-only type search', {});
       results = this.sessionSearch.findByType(type, filters);
