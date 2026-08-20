@@ -143,7 +143,7 @@ The skill includes comprehensive diagnostics, automated repair sequences, and de
    # Should show Python installation path
    ```
 
-5. If Chroma continues to fail, hybrid search will gracefully degrade to SQLite FTS5 only
+5. If Chroma continues to fail, semantic (query-text) search is unavailable, but filter-only searches (date ranges, types, projects, files) continue to work via direct SQLite queries
 
 ### Smart Install Caching Issues (v5.0.3+)
 
@@ -641,29 +641,29 @@ sqlite3 ~/.claude-mem/claude-mem.db "
    npm run worker:start  # Will recreate schema
    ```
 
-### FTS5 Search Not Working
+### Search Not Working
 
-**Symptoms**: Search returns no results, FTS5 errors.
+**Symptoms**: Query-text search returns no results or reports vector search unavailable.
+
+Semantic (query-text) search runs on ChromaDB; there is no keyword-index fallback.
+Legacy FTS5 tables from older versions are removed automatically and are not used.
 
 **Solutions**:
 
-1. Check FTS5 tables exist:
+1. Check the database has data:
    ```bash
-   sqlite3 ~/.claude-mem/claude-mem.db "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_fts';"
+   sqlite3 ~/.claude-mem/claude-mem.db "SELECT COUNT(*) FROM observations;"
    ```
 
-2. Rebuild FTS5 tables:
+2. Verify Chroma is available (requires uv/Python — see the Chroma section above):
    ```bash
-   sqlite3 ~/.claude-mem/claude-mem.db "
-     INSERT INTO observations_fts(observations_fts) VALUES('rebuild');
-     INSERT INTO session_summaries_fts(session_summaries_fts) VALUES('rebuild');
-     INSERT INTO user_prompts_fts(user_prompts_fts) VALUES('rebuild');
-   "
+   curl "http://localhost:37777/api/search?query=test"
+   # "Vector search failed" means Chroma isn't running
    ```
 
-3. Check triggers exist:
+3. Filter-only searches work without Chroma:
    ```bash
-   sqlite3 ~/.claude-mem/claude-mem.db "SELECT name FROM sqlite_master WHERE type='trigger';"
+   curl "http://localhost:37777/api/search?dateStart=2026-01-01&project=my-project"
    ```
 
 ### Database Too Large
@@ -691,12 +691,9 @@ sqlite3 ~/.claude-mem/claude-mem.db "
    "
    ```
 
-4. Rebuild FTS5 after deletion:
+4. Restart the worker so ChromaDB re-syncs with the trimmed database:
    ```bash
-   sqlite3 ~/.claude-mem/claude-mem.db "
-     INSERT INTO observations_fts(observations_fts) VALUES('rebuild');
-     INSERT INTO session_summaries_fts(session_summaries_fts) VALUES('rebuild');
-   "
+   npm run worker:restart
    ```
 
 ## MCP Search Issues
@@ -735,9 +732,9 @@ sqlite3 ~/.claude-mem/claude-mem.db "
    sqlite3 ~/.claude-mem/claude-mem.db "SELECT COUNT(*) FROM observations;"
    ```
 
-2. Verify FTS5 tables populated:
+2. Verify the worker is healthy:
    ```bash
-   sqlite3 ~/.claude-mem/claude-mem.db "SELECT COUNT(*) FROM observations_fts;"
+   curl http://localhost:37777/health
    ```
 
 3. Test simple query:
@@ -996,11 +993,11 @@ SELECT created_at, tool_name FROM observations ORDER BY created_at DESC LIMIT 10
 
 **Solution**: Stop worker, kill stale processes, restart.
 
-### "FTS5: syntax error"
+### "Vector search failed"
 
-**Cause**: Invalid search query syntax.
+**Cause**: ChromaDB is unavailable (uv/Python missing or Chroma failed to start).
 
-**Solution**: Use simpler query, avoid special characters.
+**Solution**: Install uv, restart the worker, or use filter-only searches meanwhile.
 
 ### "SQLITE_CANTOPEN"
 

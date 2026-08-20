@@ -85,7 +85,7 @@ Platform Hook/Extension
     Event-driven session lifecycle, message queues
   </Card>
   <Card title="SearchManager" icon="magnifying-glass">
-    Search orchestration (FTS5 + Chroma)
+    Search orchestration (Chroma + SQLite filters)
   </Card>
   <Card title="SSEBroadcaster" icon="broadcast-tower">
     Server-Sent Events for real-time updates
@@ -744,7 +744,6 @@ interface ObservationSearchResult {
   project: string;
   created_at_epoch: number;
   prompt_number: number;
-  rank?: number;           // FTS5 rank score
 }
 
 interface SessionSummarySearchResult {
