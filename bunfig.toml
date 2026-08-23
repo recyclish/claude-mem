@@ -1,7 +1,13 @@
 [test]
-# Force each test file into its own worker process.
-# Prevents mock.module() calls (which are permanent within a worker)
-# from leaking across test files in parallel runs.
-# Note: smol=true increases test startup time by spawning one Bun process per file.
-# See: https://github.com/thedotmack/claude-mem/issues/1299
+# smol reduces the test runner's memory usage. It does NOT isolate test files
+# from each other: it was originally added believing it forced one worker
+# process per file to contain mock.module() leakage (#1299), but that is not
+# what the flag does, and the leak persisted silently until the mocks were
+# scoped properly.
+#
+# mock.module() is process-global and has no built-in undo, so a file that
+# mocks a module MUST restore it in afterAll — capture the real exports by
+# value before mocking, then re-mock with those captured values. See
+# tests/hooks/file-context.test.ts for the pattern, and
+# tests/utils/project-name-isolation.test.ts for the regression guard.
 smol = true
