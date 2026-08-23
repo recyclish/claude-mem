@@ -1,8 +1,19 @@
 // Tests for file-context cache validation fix (#1719)
-import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn, mock } from 'bun:test';
 import { mkdtempSync, writeFileSync, utimesSync, rmSync } from 'fs';
 import { tmpdir, homedir } from 'os';
 import { join } from 'path';
+
+// Bun's mock.module() is process-global and has no built-in undo: a module mocked
+// here stays mocked for every test file loaded afterwards in the same run (#1299).
+// Capture the real exports by value first, then restore them in afterAll so these
+// mocks stay scoped to this file.
+const realProjectName = await import('../../src/utils/project-name.js');
+const realGetProjectName = realProjectName.getProjectName;
+const realGetProjectContext = realProjectName.getProjectContext;
+
+const realProjectFilter = await import('../../src/utils/project-filter.js');
+const realIsProjectExcluded = realProjectFilter.isProjectExcluded;
 
 // Mock modules that cause import chain issues — MUST be before handler imports
 mock.module('../../src/shared/SettingsDefaultsManager.js', () => ({
@@ -37,6 +48,18 @@ mock.module('../../src/utils/project-name.js', () => ({
 mock.module('../../src/utils/project-filter.js', () => ({
   isProjectExcluded: () => false,
 }));
+
+// Undo the module mocks once this file is done so they don't leak into other
+// test files (see the note above the capture block).
+afterAll(() => {
+  mock.module('../../src/utils/project-name.js', () => ({
+    getProjectName: realGetProjectName,
+    getProjectContext: realGetProjectContext,
+  }));
+  mock.module('../../src/utils/project-filter.js', () => ({
+    isProjectExcluded: realIsProjectExcluded,
+  }));
+});
 
 // Import after mocks
 import { fileContextHandler } from '../../src/cli/handlers/file-context.js';
