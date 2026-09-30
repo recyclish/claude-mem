@@ -1,0 +1,82 @@
+{
+  "export_meta": {
+    "description": "Full chronological query stream for the single highest-search non-founder user of FragranceOS (Step 3 of the FOS Funnel Diagnostic).",
+    "privacy": "De-identified for storage in a public repository. The user's email and auth UUID are intentionally omitted; the founder can re-associate via the search timestamps in the private database. Query strings are fragrance product names, not personal data.",
+    "generated_by": "agent (Claude), reading fragrance.catalog_demand_log directly",
+    "source_project": "supabase project 'fragrance-os'",
+    "source_table": "fragrance.catalog_demand_log (event_type='search' and event_type='select')",
+    "user_label": "invested_user_A (highest search count, non-founder, Google auth)",
+    "first_login_utc": "2026-07-16T17:28:06Z",
+    "search_session_window_utc": ["2026-07-17T23:21:25Z", "2026-07-18T14:50:18Z"],
+    "totals": {
+      "search_events": 36,
+      "select_events": 26,
+      "collection_adds": 26,
+      "zero_result_searches": 0
+    },
+    "measurement_notes": [
+      "A 'search' row is written per query state, INCLUDING as-you-type prefixes, so 36 search rows collapse to ~26 distinct product intents plus 3 accord/vibe searches.",
+      "'select' rows carry frag_id but a NULL query, so search->select cannot be joined on query text; linkage below is temporal (a select + collection_add followed the search within seconds).",
+      "'converted' is TRUE when a collection_add of the matching product occurred within ~90s of the search.",
+      "result_count is capped at 25 by the search endpoint, so 25 means '25 or more', not exactly 25."
+    ]
+  },
+  "queries": [
+    {"seq": 1,  "ts_utc": "2026-07-17T23:21:25Z", "query": "Yara toy",                     "result_count": 11, "converted": true,  "added_product": "Yara Tous / Lattafa",              "reformulation_of_prev": false},
+    {"seq": 2,  "ts_utc": "2026-07-17T23:21:54Z", "query": "Haya",                         "result_count": 25, "converted": true,  "added_product": "Haya / Lattafa",                   "reformulation_of_prev": false},
+    {"seq": 3,  "ts_utc": "2026-07-17T23:22:17Z", "query": "Ter",                          "result_count": 25, "converted": false, "added_product": null,                             "reformulation_of_prev": false, "note": "as-you-type prefix of #4"},
+    {"seq": 4,  "ts_utc": "2026-07-17T23:22:21Z", "query": "Teriaq",                       "result_count": 7,  "converted": true,  "added_product": "Teriaq / Lattafa",                "reformulation_of_prev": true,  "reformulation_kind": "keystroke_continuation"},
+    {"seq": 5,  "ts_utc": "2026-07-17T23:22:42Z", "query": "Mayar cherry",                 "result_count": 25, "converted": true,  "added_product": "Mayar Cherry Intense / Lattafa",  "reformulation_of_prev": false},
+    {"seq": 6,  "ts_utc": "2026-07-17T23:22:58Z", "query": "Angham",                       "result_count": 8,  "converted": true,  "added_product": "Angham / Lattafa",                "reformulation_of_prev": false},
+    {"seq": 7,  "ts_utc": "2026-07-17T23:23:35Z", "query": "Ana a",                        "result_count": 18, "converted": false, "added_product": null,                             "reformulation_of_prev": false, "note": "as-you-type prefix of #8"},
+    {"seq": 8,  "ts_utc": "2026-07-17T23:23:35Z", "query": "Ana abi",                      "result_count": 15, "converted": true,  "added_product": "Ana Abiyedh Rouge / Lattafa",     "reformulation_of_prev": true,  "reformulation_kind": "keystroke_continuation"},
+    {"seq": 9,  "ts_utc": "2026-07-17T23:24:05Z", "query": "Pride nebras",                 "result_count": 6,  "converted": true,  "added_product": "Nebras / Lattafa",                "reformulation_of_prev": false},
+    {"seq": 10, "ts_utc": "2026-07-17T23:24:24Z", "query": "Dynasty",                      "result_count": 3,  "converted": true,  "added_product": "Dynasty / Lattafa",               "reformulation_of_prev": false},
+    {"seq": 11, "ts_utc": "2026-07-17T23:24:45Z", "query": "Mango jug",                    "result_count": 19, "converted": true,  "added_product": "Mango Jugoso / Paris Corner",      "reformulation_of_prev": false},
+    {"seq": 12, "ts_utc": "2026-07-17T23:26:18Z", "query": "Nirto red",                    "result_count": 4,  "converted": true,  "added_product": "Nitro Red / Dumont Paris",         "reformulation_of_prev": false, "note": "user typo 'Nirto' for 'Nitro' still returned the product"},
+    {"seq": 13, "ts_utc": "2026-07-17T23:26:46Z", "query": "Banana republic",             "result_count": 25, "converted": false, "added_product": null,                             "reformulation_of_prev": false, "note": "brand-level prefix of #14"},
+    {"seq": 14, "ts_utc": "2026-07-17T23:26:52Z", "query": "Banana republic dark cherry", "result_count": 25, "converted": true,  "added_product": "Dark Cherry Amber / Banana Republic", "reformulation_of_prev": true, "reformulation_kind": "narrowing_refinement"},
+    {"seq": 15, "ts_utc": "2026-07-17T23:27:05Z", "query": "Oud gold",                     "result_count": 25, "converted": true,  "added_product": "Oud Gold / Al Haramain",           "reformulation_of_prev": false},
+    {"seq": 16, "ts_utc": "2026-07-17T23:27:31Z", "query": "Memories",                     "result_count": 25, "converted": true,  "added_product": "Memories / Superz Budapest",       "reformulation_of_prev": false},
+    {"seq": 17, "ts_utc": "2026-07-17T23:28:11Z", "query": "Memories",                     "result_count": 25, "converted": false, "added_product": null,                             "reformulation_of_prev": true,  "reformulation_kind": "exact_repeat_40s_later", "note": "GENUINE friction signature: identical query re-issued 40s later, not a keystroke artifact"},
+    {"seq": 18, "ts_utc": "2026-07-17T23:28:22Z", "query": "Tornado",                      "result_count": 2,  "converted": true,  "added_product": "Tornado / Maison Asrar",           "reformulation_of_prev": false},
+    {"seq": 19, "ts_utc": "2026-07-17T23:28:40Z", "query": "Dossier",                      "result_count": 25, "converted": false, "added_product": null,                             "reformulation_of_prev": false, "note": "brand-level prefix of #20"},
+    {"seq": 20, "ts_utc": "2026-07-17T23:28:48Z", "query": "Dossier ambery saff",         "result_count": 25, "converted": true,  "added_product": "Ambery Saffron / Dossier",         "reformulation_of_prev": true,  "reformulation_kind": "narrowing_refinement"},
+    {"seq": 21, "ts_utc": "2026-07-17T23:28:58Z", "query": "Ambery ch",                    "result_count": 25, "converted": false, "added_product": null,                             "reformulation_of_prev": false, "note": "as-you-type prefix of #22"},
+    {"seq": 22, "ts_utc": "2026-07-17T23:28:58Z", "query": "Ambery cherry",                "result_count": 25, "converted": true,  "added_product": "Ambery Cherry / Dossier",          "reformulation_of_prev": true,  "reformulation_kind": "keystroke_continuation"},
+    {"seq": 23, "ts_utc": "2026-07-17T23:29:09Z", "query": "Powdery tob",                  "result_count": 10, "converted": false, "added_product": null,                             "reformulation_of_prev": false, "note": "as-you-type prefix of #24"},
+    {"seq": 24, "ts_utc": "2026-07-17T23:29:10Z", "query": "Powdery toba",                 "result_count": 8,  "converted": true,  "added_product": "Powdery Tobacco / Dossier",        "reformulation_of_prev": true,  "reformulation_kind": "keystroke_continuation"},
+    {"seq": 25, "ts_utc": "2026-07-17T23:29:28Z", "query": "Black currant and vanilla",    "result_count": 17, "converted": false, "added_product": null,                             "reformulation_of_prev": false, "note": "ACCORD/vibe search (scent description, not a product name) - returned results but produced no add"},
+    {"seq": 26, "ts_utc": "2026-07-17T23:29:42Z", "query": "Coffee and whiskey",           "result_count": 7,  "converted": false, "added_product": null,                             "reformulation_of_prev": false, "note": "ACCORD/vibe search - no add"},
+    {"seq": 27, "ts_utc": "2026-07-17T23:29:46Z", "query": "Coffee and whiskey bath",      "result_count": 3,  "converted": false, "added_product": null,                             "reformulation_of_prev": true,  "reformulation_kind": "narrowing_refinement", "note": "ACCORD/vibe search - no add"},
+    {"seq": 28, "ts_utc": "2026-07-17T23:29:57Z", "query": "Good girl blush",              "result_count": 25, "converted": true,  "added_product": "Good Girl Blush / Carolina Herrera", "reformulation_of_prev": false},
+    {"seq": 29, "ts_utc": "2026-07-17T23:30:08Z", "query": "Perfect elixir",               "result_count": 25, "converted": true,  "added_product": "Perfect Elixir / Marc Jacobs",     "reformulation_of_prev": false},
+    {"seq": 30, "ts_utc": "2026-07-17T23:30:20Z", "query": "Nest indigo",                  "result_count": 7,  "converted": true,  "added_product": "Indigo / Nest",                    "reformulation_of_prev": false},
+    {"seq": 31, "ts_utc": "2026-07-18T13:51:16Z", "query": "Plus one",                     "result_count": 5,  "converted": true,  "added_product": "Plus One / Oakcha",                "reformulation_of_prev": false, "note": "new session, ~14h later"},
+    {"seq": 32, "ts_utc": "2026-07-18T13:51:29Z", "query": "Honey oud",                    "result_count": 25, "converted": true,  "added_product": "Honey Oud / Bellavita Luxury",     "reformulation_of_prev": false},
+    {"seq": 33, "ts_utc": "2026-07-18T13:52:04Z", "query": "Casablanca",                   "result_count": 8,  "converted": true,  "added_product": "Casablanca / Swiss Arabian",       "reformulation_of_prev": false},
+    {"seq": 34, "ts_utc": "2026-07-18T14:49:54Z", "query": "Peach rings",                  "result_count": 18, "converted": true,  "added_product": "Peach Rings / Oakcha",             "reformulation_of_prev": false, "note": "new session, ~1h later"},
+    {"seq": 35, "ts_utc": "2026-07-18T14:50:03Z", "query": "Bianco latte",                 "result_count": 13, "converted": true,  "added_product": "Bianco Latte / Giardini di Toscana", "reformulation_of_prev": false},
+    {"seq": 36, "ts_utc": "2026-07-18T14:50:18Z", "query": "Eternal oud",                  "result_count": 22, "converted": true,  "added_product": "Eternal Oud / Lattafa",            "reformulation_of_prev": false}
+  ],
+  "analysis": {
+    "zero_result_queries": [],
+    "results_but_no_add_queries": [
+      "Memories (2nd issue, seq 17 - already added on 1st issue)",
+      "Black currant and vanilla (seq 25, accord/vibe search)",
+      "Coffee and whiskey (seq 26, accord/vibe search)",
+      "Coffee and whiskey bath (seq 27, accord/vibe search)"
+    ],
+    "reformulation_pairs": [
+      {"pair": ["Ter", "Teriaq"], "kind": "keystroke_continuation"},
+      {"pair": ["Ana a", "Ana abi"], "kind": "keystroke_continuation"},
+      {"pair": ["Banana republic", "Banana republic dark cherry"], "kind": "narrowing_refinement"},
+      {"pair": ["Memories", "Memories"], "kind": "exact_repeat_40s_later", "friction": true},
+      {"pair": ["Dossier", "Dossier ambery saff"], "kind": "narrowing_refinement"},
+      {"pair": ["Ambery ch", "Ambery cherry"], "kind": "keystroke_continuation"},
+      {"pair": ["Powdery tob", "Powdery toba"], "kind": "keystroke_continuation"},
+      {"pair": ["Coffee and whiskey", "Coffee and whiskey bath"], "kind": "narrowing_refinement"}
+    ],
+    "interpretation": "This user was doing bulk data-entry of a real-life fragrance collection: search a product by name, tap the top result, add it, repeat. 26 of 26 product-name searches converted to a collection add (~100%). The only non-converting searches were 3 accord/vibe descriptions ('Black currant and vanilla', 'Coffee and whiskey', 'Coffee and whiskey bath') where she typed a scent profile instead of a product name and added nothing - a small but real signal that name-search works and vibe-search does not close. Search dominated by Middle-Eastern / designer-clone houses (Lattafa x8, Dossier x3, Oakcha x2)."
+  }
+}
