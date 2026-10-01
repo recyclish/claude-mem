@@ -12,7 +12,6 @@ import {
   UserPromptRecord,
   LatestPromptResult
 } from '../../types/database.js';
-import type { PendingMessageStore } from './PendingMessageStore.js';
 import { computeObservationContentHash, findDuplicateObservation } from './observations/store.js';
 import { parseFileList } from './observations/files.js';
 import { DEFAULT_PLATFORM_SOURCE, normalizePlatformSource, sortPlatformSources } from '../../shared/platform-source.js';
@@ -66,6 +65,7 @@ export class SessionStore {
     this.addSessionPlatformSourceColumn();
     this.addObservationModelColumns();
     this.ensureMergedIntoProjectColumns();
+    this.dropLegacyFTSInfrastructure();
   }
 
   /**
@@ -405,7 +405,7 @@ export class SessionStore {
   }
 
   /**
-   * Create user_prompts table with FTS5 support (migration 10)
+   * Create user_prompts table (migration 10)
    */
   private createUserPromptsTable(): void {
     // Check if migration already applied
@@ -420,7 +420,7 @@ export class SessionStore {
       return;
     }
 
-    logger.debug('DB', 'Creating user_prompts table with FTS5 support');
+    logger.debug('DB', 'Creating user_prompts table');
 
     // Begin transaction
     this.db.run('BEGIN TRANSACTION');
@@ -442,40 +442,6 @@ export class SessionStore {
       CREATE INDEX idx_user_prompts_prompt_number ON user_prompts(prompt_number);
       CREATE INDEX idx_user_prompts_lookup ON user_prompts(content_session_id, prompt_number);
     `);
-
-    // Create FTS5 virtual table — skip if FTS5 is unavailable (e.g., Bun on Windows #791).
-    // The user_prompts table itself is still created; only FTS indexing is skipped.
-    try {
-      this.db.run(`
-        CREATE VIRTUAL TABLE user_prompts_fts USING fts5(
-          prompt_text,
-          content='user_prompts',
-          content_rowid='id'
-        );
-      `);
-
-      // Create triggers to sync FTS5
-      this.db.run(`
-        CREATE TRIGGER user_prompts_ai AFTER INSERT ON user_prompts BEGIN
-          INSERT INTO user_prompts_fts(rowid, prompt_text)
-          VALUES (new.id, new.prompt_text);
-        END;
-
-        CREATE TRIGGER user_prompts_ad AFTER DELETE ON user_prompts BEGIN
-          INSERT INTO user_prompts_fts(user_prompts_fts, rowid, prompt_text)
-          VALUES('delete', old.id, old.prompt_text);
-        END;
-
-        CREATE TRIGGER user_prompts_au AFTER UPDATE ON user_prompts BEGIN
-          INSERT INTO user_prompts_fts(user_prompts_fts, rowid, prompt_text)
-          VALUES('delete', old.id, old.prompt_text);
-          INSERT INTO user_prompts_fts(rowid, prompt_text)
-          VALUES (new.id, new.prompt_text);
-        END;
-      `);
-    } catch (ftsError) {
-      logger.warn('DB', 'FTS5 not available — user_prompts_fts skipped (search uses ChromaDB)', {}, ftsError as Error);
-    }
 
     // Commit transaction
     this.db.run('COMMIT');
@@ -690,7 +656,7 @@ export class SessionStore {
       // 1. Recreate observations table
       // ==========================================
 
-      // Drop FTS triggers first (they reference the observations table)
+      // Drop legacy FTS triggers first (they reference the observations table)
       this.db.run('DROP TRIGGER IF EXISTS observations_ai');
       this.db.run('DROP TRIGGER IF EXISTS observations_ad');
       this.db.run('DROP TRIGGER IF EXISTS observations_au');
@@ -739,30 +705,6 @@ export class SessionStore {
         CREATE INDEX idx_observations_created ON observations(created_at_epoch DESC);
       `);
 
-      // Recreate FTS triggers only if observations_fts exists
-      // (SessionSearch.ensureFTSTables creates it on first use with IF NOT EXISTS)
-      const hasFTS = (this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='observations_fts'").all() as { name: string }[]).length > 0;
-      if (hasFTS) {
-        this.db.run(`
-          CREATE TRIGGER IF NOT EXISTS observations_ai AFTER INSERT ON observations BEGIN
-            INSERT INTO observations_fts(rowid, title, subtitle, narrative, text, facts, concepts)
-            VALUES (new.id, new.title, new.subtitle, new.narrative, new.text, new.facts, new.concepts);
-          END;
-
-          CREATE TRIGGER IF NOT EXISTS observations_ad AFTER DELETE ON observations BEGIN
-            INSERT INTO observations_fts(observations_fts, rowid, title, subtitle, narrative, text, facts, concepts)
-            VALUES('delete', old.id, old.title, old.subtitle, old.narrative, old.text, old.facts, old.concepts);
-          END;
-
-          CREATE TRIGGER IF NOT EXISTS observations_au AFTER UPDATE ON observations BEGIN
-            INSERT INTO observations_fts(observations_fts, rowid, title, subtitle, narrative, text, facts, concepts)
-            VALUES('delete', old.id, old.title, old.subtitle, old.narrative, old.text, old.facts, old.concepts);
-            INSERT INTO observations_fts(rowid, title, subtitle, narrative, text, facts, concepts)
-            VALUES (new.id, new.title, new.subtitle, new.narrative, new.text, new.facts, new.concepts);
-          END;
-        `);
-      }
-
       // ==========================================
       // 2. Recreate session_summaries table
       // ==========================================
@@ -799,7 +741,7 @@ export class SessionStore {
         FROM session_summaries
       `);
 
-      // Drop session_summaries FTS triggers before dropping the table
+      // Drop legacy session_summaries FTS triggers before dropping the table
       this.db.run('DROP TRIGGER IF EXISTS session_summaries_ai');
       this.db.run('DROP TRIGGER IF EXISTS session_summaries_ad');
       this.db.run('DROP TRIGGER IF EXISTS session_summaries_au');
@@ -813,29 +755,6 @@ export class SessionStore {
         CREATE INDEX idx_session_summaries_project ON session_summaries(project);
         CREATE INDEX idx_session_summaries_created ON session_summaries(created_at_epoch DESC);
       `);
-
-      // Recreate session_summaries FTS triggers if FTS table exists
-      const hasSummariesFTS = (this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='session_summaries_fts'").all() as { name: string }[]).length > 0;
-      if (hasSummariesFTS) {
-        this.db.run(`
-          CREATE TRIGGER IF NOT EXISTS session_summaries_ai AFTER INSERT ON session_summaries BEGIN
-            INSERT INTO session_summaries_fts(rowid, request, investigated, learned, completed, next_steps, notes)
-            VALUES (new.id, new.request, new.investigated, new.learned, new.completed, new.next_steps, new.notes);
-          END;
-
-          CREATE TRIGGER IF NOT EXISTS session_summaries_ad AFTER DELETE ON session_summaries BEGIN
-            INSERT INTO session_summaries_fts(session_summaries_fts, rowid, request, investigated, learned, completed, next_steps, notes)
-            VALUES('delete', old.id, old.request, old.investigated, old.learned, old.completed, old.next_steps, old.notes);
-          END;
-
-          CREATE TRIGGER IF NOT EXISTS session_summaries_au AFTER UPDATE ON session_summaries BEGIN
-            INSERT INTO session_summaries_fts(session_summaries_fts, rowid, request, investigated, learned, completed, next_steps, notes)
-            VALUES('delete', old.id, old.request, old.investigated, old.learned, old.completed, old.next_steps, old.notes);
-            INSERT INTO session_summaries_fts(rowid, request, investigated, learned, completed, next_steps, notes)
-            VALUES (new.id, new.request, new.investigated, new.learned, new.completed, new.next_steps, new.notes);
-          END;
-        `);
-      }
 
       // Record migration
       this.db.prepare('INSERT OR IGNORE INTO schema_versions (version, applied_at) VALUES (?, ?)').run(21, new Date().toISOString());
@@ -973,6 +892,46 @@ export class SessionStore {
     this.db.run(
       'CREATE INDEX IF NOT EXISTS idx_summaries_merged_into ON session_summaries(merged_into_project)'
     );
+  }
+
+  /**
+   * Drop legacy FTS5 tables and sync triggers.
+   *
+   * FTS5 search was replaced by ChromaDB (vector search) and direct SQLite
+   * filtering; the tables were only kept synchronized for backward
+   * compatibility. Self-idempotent via DROP ... IF EXISTS — does NOT bump
+   * schema_versions. Mirrors MigrationRunner.dropLegacyFTSInfrastructure.
+   */
+  private dropLegacyFTSInfrastructure(): void {
+    // Sync triggers reference the FTS tables, so drop them first
+    this.db.run(`
+      DROP TRIGGER IF EXISTS observations_ai;
+      DROP TRIGGER IF EXISTS observations_ad;
+      DROP TRIGGER IF EXISTS observations_au;
+      DROP TRIGGER IF EXISTS session_summaries_ai;
+      DROP TRIGGER IF EXISTS session_summaries_ad;
+      DROP TRIGGER IF EXISTS session_summaries_au;
+      DROP TRIGGER IF EXISTS user_prompts_ai;
+      DROP TRIGGER IF EXISTS user_prompts_ad;
+      DROP TRIGGER IF EXISTS user_prompts_au;
+    `);
+
+    const ftsTables = this.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('observations_fts', 'session_summaries_fts', 'user_prompts_fts')"
+    ).all() as TableNameRow[];
+
+    if (ftsTables.length === 0) return;
+
+    logger.debug('DB', 'Dropping legacy FTS5 tables (search uses ChromaDB)');
+    for (const { name } of ftsTables) {
+      try {
+        this.db.run(`DROP TABLE IF EXISTS ${name}`);
+      } catch (error) {
+        // Dropping a virtual table fails when the FTS5 module is unavailable
+        // (e.g., Bun on Windows #791) — harmless to leave the table in place.
+        logger.warn('DB', `Could not drop legacy FTS5 table ${name}`, {}, error as Error);
+      }
+    }
   }
 
   /**
@@ -1958,154 +1917,6 @@ export class SessionStore {
     return storeTx();
   }
 
-  /**
-   * @deprecated Use storeObservations instead. This method is kept for backwards compatibility.
-   *
-   * ATOMIC: Store observations + summary + mark pending message as processed
-   *
-   * This method wraps observation storage, summary storage, and message completion
-   * in a single database transaction to prevent race conditions. If the worker crashes
-   * during processing, either all operations succeed together or all fail together.
-   *
-   * This fixes the observation duplication bug where observations were stored but
-   * the message wasn't marked complete, causing reprocessing on crash recovery.
-   *
-   * @param memorySessionId - SDK memory session ID
-   * @param project - Project name
-   * @param observations - Array of observations to store (can be empty)
-   * @param summary - Optional summary to store
-   * @param messageId - Pending message ID to mark as processed
-   * @param pendingStore - PendingMessageStore instance for marking complete
-   * @param promptNumber - Optional prompt number
-   * @param discoveryTokens - Discovery tokens count
-   * @param overrideTimestampEpoch - Optional override timestamp
-   * @returns Object with observation IDs, optional summary ID, and timestamp
-   */
-  storeObservationsAndMarkComplete(
-    memorySessionId: string,
-    project: string,
-    observations: Array<{
-      type: string;
-      title: string | null;
-      subtitle: string | null;
-      facts: string[];
-      narrative: string | null;
-      concepts: string[];
-      files_read: string[];
-      files_modified: string[];
-    }>,
-    summary: {
-      request: string;
-      investigated: string;
-      learned: string;
-      completed: string;
-      next_steps: string;
-      notes: string | null;
-    } | null,
-    messageId: number,
-    _pendingStore: PendingMessageStore,
-    promptNumber?: number,
-    discoveryTokens: number = 0,
-    overrideTimestampEpoch?: number,
-    generatedByModel?: string
-  ): { observationIds: number[]; summaryId?: number; createdAtEpoch: number } {
-    // Use override timestamp if provided
-    const timestampEpoch = overrideTimestampEpoch ?? Date.now();
-    const timestampIso = new Date(timestampEpoch).toISOString();
-
-    // Create transaction that wraps all operations
-    const storeAndMarkTx = this.db.transaction(() => {
-      const observationIds: number[] = [];
-
-      // 1. Store all observations (with content-hash deduplication)
-      const obsStmt = this.db.prepare(`
-        INSERT INTO observations
-        (memory_session_id, project, type, title, subtitle, facts, narrative, concepts,
-         files_read, files_modified, prompt_number, discovery_tokens, content_hash, created_at, created_at_epoch,
-         generated_by_model)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-
-      for (const observation of observations) {
-        // Content-hash deduplication (same logic as storeObservation singular)
-        const contentHash = computeObservationContentHash(memorySessionId, observation.title, observation.narrative);
-        const existing = findDuplicateObservation(this.db, contentHash, timestampEpoch);
-        if (existing) {
-          observationIds.push(existing.id);
-          continue;
-        }
-
-        const result = obsStmt.run(
-          memorySessionId,
-          project,
-          observation.type,
-          observation.title,
-          observation.subtitle,
-          JSON.stringify(observation.facts),
-          observation.narrative,
-          JSON.stringify(observation.concepts),
-          JSON.stringify(observation.files_read),
-          JSON.stringify(observation.files_modified),
-          promptNumber || null,
-          discoveryTokens,
-          contentHash,
-          timestampIso,
-          timestampEpoch,
-          generatedByModel || null
-        );
-        observationIds.push(Number(result.lastInsertRowid));
-      }
-
-      // 2. Store summary if provided
-      let summaryId: number | undefined;
-      if (summary) {
-        const summaryStmt = this.db.prepare(`
-          INSERT INTO session_summaries
-          (memory_session_id, project, request, investigated, learned, completed,
-           next_steps, notes, prompt_number, discovery_tokens, created_at, created_at_epoch)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-
-        const result = summaryStmt.run(
-          memorySessionId,
-          project,
-          summary.request,
-          summary.investigated,
-          summary.learned,
-          summary.completed,
-          summary.next_steps,
-          summary.notes,
-          promptNumber || null,
-          discoveryTokens,
-          timestampIso,
-          timestampEpoch
-        );
-        summaryId = Number(result.lastInsertRowid);
-      }
-
-      // 3. Mark pending message as processed
-      // This UPDATE is part of the same transaction, so if it fails,
-      // observations and summary will be rolled back
-      const updateStmt = this.db.prepare(`
-        UPDATE pending_messages
-        SET
-          status = 'processed',
-          completed_at_epoch = ?,
-          tool_input = NULL,
-          tool_response = NULL
-        WHERE id = ? AND status = 'processing'
-      `);
-      updateStmt.run(timestampEpoch, messageId);
-
-      return { observationIds, summaryId, createdAtEpoch: timestampEpoch };
-    });
-
-    // Execute the transaction and return results
-    return storeAndMarkTx();
-  }
-
-
-
   // REMOVED: cleanupOrphanedSessions - violates "EVERYTHING SHOULD SAVE ALWAYS"
   // There's no such thing as an "orphaned" session. Sessions are created by hooks
   // and managed by Claude Code's lifecycle. Worker restarts don't invalidate them.
@@ -2646,23 +2457,6 @@ export class SessionStore {
     );
 
     return { imported: true, id: result.lastInsertRowid as number };
-  }
-
-  /**
-   * Rebuild the FTS5 index for observations.
-   * Should be called after bulk imports to ensure imported rows are searchable.
-   * No-op if observations_fts table does not exist.
-   */
-  rebuildObservationsFTSIndex(): void {
-    const hasFTS = (this.db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='observations_fts'"
-    ).all() as { name: string }[]).length > 0;
-
-    if (!hasFTS) {
-      return;
-    }
-
-    this.db.run("INSERT INTO observations_fts(observations_fts) VALUES('rebuild')");
   }
 
   /**

@@ -38,7 +38,7 @@ Restart Claude Code. Context from previous sessions will automatically appear in
 - 🔒 **Privacy Control** - Use `<private>` tags to exclude sensitive content from storage
 - ⚙️ **Context Configuration** - Fine-grained control over what context gets injected
 - 🤖 **Automatic Operation** - No manual intervention required
-- 📊 **FTS5 Search** - Fast full-text search across observations
+- 📊 **Semantic Search** - ChromaDB vector search plus structured SQLite filtering
 - 🔗 **Citations** - Reference past observations with IDs
 
 ## How It Works
@@ -69,7 +69,7 @@ Restart Claude Code. Context from previous sessions will automatically appear in
 1. **4 Lifecycle Hooks** - SessionStart, UserPromptSubmit, PostToolUse, Stop
 2. **Smart Install** - Cached dependency checker (pre-hook script)
 3. **Worker Service** - HTTP API on port 37777 managed by Bun
-4. **SQLite Database** - Stores sessions, observations, summaries with FTS5 search
+4. **SQLite Database** - Stores sessions, observations, summaries; mirrored to ChromaDB for semantic search
 5. **MCP Search Tools** - Query historical context with natural language
 6. **Web Viewer UI** - Real-time visualization with SSE and infinite scroll
 

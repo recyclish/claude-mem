@@ -234,35 +234,19 @@ Step 3: get_observations(ids=[<critical_observations>])
 
 ## Search Query Syntax
 
-The `query` parameter supports SQLite FTS5 full-text search syntax:
-
-### Boolean Operators
-
-```
-query="authentication AND JWT"           # Both terms must appear
-query="OAuth OR JWT"                      # Either term can appear
-query="security NOT deprecated"           # Exclude deprecated items
-```
-
-### Phrase Searches
+The `query` parameter is a **semantic search** — plain natural language, matched
+by meaning via ChromaDB vector embeddings rather than exact keywords:
 
 ```
-query='"database migration"'             # Exact phrase match
+query="how does authentication work"     # Finds JWT/OAuth/session observations
+query="database migration problems"      # Finds related fixes and decisions
+query="why we chose SQLite"              # Finds the relevant decision records
 ```
 
-### Column-Specific Searches
-
-```
-query="title:authentication"             # Search in title only
-query="content:database"                  # Search in content only
-query="concepts:security"                 # Search in concepts only
-```
-
-### Combining Operators
-
-```
-query='"user auth" AND (JWT OR session) NOT deprecated'
-```
+Describe what you're looking for the way you'd ask a teammate; there is no
+boolean or column-prefix syntax. To constrain results structurally, combine the
+query with filters (`type`, `project`, `dateStart`/`dateEnd`, `concepts`,
+`files`) instead of query operators.
 
 ## Token Management
 
@@ -419,7 +403,7 @@ get_observations(ids=[<5-most-relevant>])  # ~2,500-5,000 tokens
 ### Search Performance
 
 If searches seem slow:
-1. Be more specific in queries (helps FTS5 index)
+1. Be more specific in queries (sharper semantic matches)
 2. Use date range filters to narrow scope
 3. Specify project filter when possible
 4. Use smaller limit values
@@ -442,9 +426,9 @@ If searches seem slow:
 
 **Worker Service:** Express API on port 37777, managed by Bun
 
-**Database:** SQLite FTS5 full-text search on `~/.claude-mem/claude-mem.db`
+**Database:** SQLite structured storage and filtering on `~/.claude-mem/claude-mem.db`
 
-**Vector Search:** Chroma embeddings for semantic search (underlying implementation)
+**Vector Search:** Chroma embeddings for semantic search on query text
 
 ## Next Steps
 

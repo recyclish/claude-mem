@@ -221,10 +221,12 @@ describe('ChromaSearchStrategy', () => {
 
       await strategy.search(options);
 
+      // Matches native rows (project) and adopted merged-worktree rows
+      // (merged_into_project) so parent-project queries surface merged children
       expect(mockChromaSync.queryChroma).toHaveBeenCalledWith(
         'test query',
         100,
-        { project: 'my-project' }
+        { $or: [{ project: 'my-project' }, { merged_into_project: 'my-project' }] }
       );
     });
 
@@ -240,7 +242,12 @@ describe('ChromaSearchStrategy', () => {
       expect(mockChromaSync.queryChroma).toHaveBeenCalledWith(
         'test query',
         100,
-        { $and: [{ doc_type: 'observation' }, { project: 'my-project' }] }
+        {
+          $and: [
+            { doc_type: 'observation' },
+            { $or: [{ project: 'my-project' }, { merged_into_project: 'my-project' }] }
+          ]
+        }
       );
     });
 

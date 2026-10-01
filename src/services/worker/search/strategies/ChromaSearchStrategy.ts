@@ -48,6 +48,7 @@ export class ChromaSearchStrategy extends BaseSearchStrategy implements SearchSt
       files,
       limit = SEARCH_CONSTANTS.DEFAULT_LIMIT,
       project,
+      dateRange,
       orderBy = 'date_desc'
     } = options;
 
@@ -89,8 +90,8 @@ export class ChromaSearchStrategy extends BaseSearchStrategy implements SearchSt
         };
       }
 
-      // Step 2: Filter by recency (90 days)
-      const recentItems = this.filterByRecency(chromaResults);
+      // Step 2: Filter by the user-provided date range, or the 90-day recency window
+      const recentItems = this.filterByRecency(chromaResults, dateRange);
       logger.debug('SEARCH', 'ChromaSearchStrategy: Filtered by recency', {
         count: recentItems.length
       });
@@ -174,7 +175,15 @@ export class ChromaSearchStrategy extends BaseSearchStrategy implements SearchSt
     }
 
     if (project) {
-      const projectFilter = { project };
+      // Match both native-provenance rows (project) and adopted merged-worktree
+      // rows (merged_into_project) so a parent-project query surfaces its
+      // merged children's observations too.
+      const projectFilter = {
+        $or: [
+          { project },
+          { merged_into_project: project }
+        ]
+      };
       if (docTypeFilter) {
         return { $and: [docTypeFilter, projectFilter] };
       }
@@ -185,7 +194,8 @@ export class ChromaSearchStrategy extends BaseSearchStrategy implements SearchSt
   }
 
   /**
-   * Filter results by recency (90-day window)
+   * Filter results by date range, defaulting to the 90-day recency window
+   * when the caller did not provide one.
    *
    * IMPORTANT: ChromaSync.queryChroma() returns deduplicated `ids` (unique sqlite_ids)
    * but the `metadatas` array may contain multiple entries per sqlite_id (e.g., one
@@ -194,11 +204,30 @@ export class ChromaSearchStrategy extends BaseSearchStrategy implements SearchSt
    * This method iterates over the deduplicated `ids` and finds the first matching
    * metadata for each ID to avoid array misalignment issues.
    */
-  private filterByRecency(chromaResults: {
-    ids: number[];
-    metadatas: ChromaMetadata[];
-  }): Array<{ id: number; meta: ChromaMetadata }> {
-    const cutoff = Date.now() - SEARCH_CONSTANTS.RECENCY_WINDOW_MS;
+  private filterByRecency(
+    chromaResults: {
+      ids: number[];
+      metadatas: ChromaMetadata[];
+    },
+    dateRange?: { start?: string | number; end?: string | number }
+  ): Array<{ id: number; meta: ChromaMetadata }> {
+    let startEpoch: number | undefined;
+    let endEpoch: number | undefined;
+
+    if (dateRange) {
+      if (dateRange.start) {
+        startEpoch = typeof dateRange.start === 'number'
+          ? dateRange.start
+          : new Date(dateRange.start).getTime();
+      }
+      if (dateRange.end) {
+        endEpoch = typeof dateRange.end === 'number'
+          ? dateRange.end
+          : new Date(dateRange.end).getTime();
+      }
+    } else {
+      startEpoch = Date.now() - SEARCH_CONSTANTS.RECENCY_WINDOW_MS;
+    }
 
     // Build a map from sqlite_id to first metadata for efficient lookup
     const metadataByIdMap = new Map<number, ChromaMetadata>();
@@ -214,7 +243,9 @@ export class ChromaSearchStrategy extends BaseSearchStrategy implements SearchSt
         id,
         meta: metadataByIdMap.get(id) as ChromaMetadata
       }))
-      .filter(item => item.meta && item.meta.created_at_epoch > cutoff);
+      .filter(item => item.meta && item.meta.created_at_epoch != null
+        && (!startEpoch || item.meta.created_at_epoch >= startEpoch)
+        && (!endEpoch || item.meta.created_at_epoch <= endEpoch));
   }
 
   /**

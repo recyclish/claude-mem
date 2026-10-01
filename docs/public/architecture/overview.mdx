@@ -12,7 +12,7 @@ Claude-Mem operates as a Claude Code plugin with five core components:
 1. **Plugin Hooks** - Capture lifecycle events (6 hook files)
 2. **Smart Install** - Cached dependency checker (pre-hook script, runs before context-hook)
 3. **Worker Service** - Process observations via Claude Agent SDK + HTTP API (10 search endpoints)
-4. **Database Layer** - Store sessions and observations (SQLite + FTS5 + ChromaDB)
+4. **Database Layer** - Store sessions and observations (SQLite + ChromaDB)
 5. **mem-search Skill** - Skill-based search with progressive disclosure (v5.4.0+)
 6. **Viewer UI** - Web-based real-time memory stream visualization
 
@@ -47,13 +47,13 @@ Hook (stdin) → Database → Worker Service → SDK Processor → Database → 
 
 ### Search Pipeline
 ```
-User Query → MCP Tools Invoked → HTTP API → SessionSearch Service → FTS5 Database → Search Results → Claude
+User Query → MCP Tools Invoked → HTTP API → SearchOrchestrator → ChromaDB / SQLite → Search Results → Claude
 ```
 
 1. **User Query**: User asks naturally: "What bugs did we fix?"
 2. **MCP Tools Invoked**: Claude recognizes intent and invokes MCP search tools
 3. **HTTP API**: MCP tools call HTTP endpoint (e.g., `/api/search/observations`)
-4. **SessionSearch**: Worker service queries FTS5 virtual tables
+4. **SearchOrchestrator**: Worker service runs ChromaDB vector search (query text) or direct SQLite filtering (filter-only)
 5. **Format**: Results formatted and returned via MCP
 6. **Return**: Claude presents formatted results to user
 
@@ -76,7 +76,7 @@ Uses 3-layer progressive disclosure: search → timeline → get_observations
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │ 2. User Types Prompt → UserPromptSubmit Hook Fires              │
-│    Creates session in database, saves raw user prompt for FTS5  │
+│    Creates session in database, saves raw user prompt           │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -124,8 +124,8 @@ claude-mem/
 │   │   ├── worker-service.ts   # Express HTTP + SSE service
 │   │   └── sqlite/             # Database layer
 │   │       ├── SessionStore.ts # CRUD operations
-│   │       ├── SessionSearch.ts # FTS5 search service
-│   │       ├── migrations.ts
+│   │       ├── SessionSearch.ts # Filter-only structured queries
+│   │       ├── migrations/     # MigrationRunner
 │   │       └── types.ts
 │   │
 │   ├── ui/                     # Viewer UI
@@ -206,16 +206,16 @@ See [Worker Service](/architecture/worker-service) for HTTP API and endpoints.
 
 ### 3. Database Layer
 SQLite3 with bun:sqlite driver featuring:
-- FTS5 virtual tables for full-text search
 - SessionStore for CRUD operations
-- SessionSearch for FTS5 queries
+- SessionSearch for filter-only structured queries
+- ChromaDB mirror for semantic (vector) search
 - Location: `~/.claude-mem/claude-mem.db`
 
-See [Database Architecture](/architecture/database) for schema and FTS5 search.
+See [Database Architecture](/architecture/database) for the schema.
 
 ### 4. mem-search Skill (v5.4.0+)
 Skill-based search with progressive disclosure providing 10 search operations:
-- Search observations, sessions, prompts (full-text FTS5)
+- Search observations, sessions, prompts (semantic vector search)
 - Filter by type, concept, file
 - Get recent context, timeline, timeline by query
 - API help documentation

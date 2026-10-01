@@ -259,13 +259,15 @@ describe('SQLiteSearchStrategy', () => {
       });
     });
 
-    it('should use default limit when not specified', () => {
+    it('should pass options through unchanged when limit is not specified', () => {
       const options: StrategySearchOptions = {};
 
       strategy.findByConcept('test-concept', options);
 
+      // Defaulting is delegated to SessionSearch.findByConcept, which applies
+      // its own limit when none is given — the strategy must not inject one.
       const callArgs = mockSessionSearch.findByConcept.mock.calls[0];
-      expect(callArgs[1].limit).toBe(20); // SEARCH_CONSTANTS.DEFAULT_LIMIT
+      expect(callArgs[1].limit).toBeUndefined();
     });
   });
 

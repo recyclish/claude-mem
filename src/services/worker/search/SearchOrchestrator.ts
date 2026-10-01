@@ -17,6 +17,7 @@ import { ChromaSearchStrategy } from './strategies/ChromaSearchStrategy.js';
 import { SQLiteSearchStrategy } from './strategies/SQLiteSearchStrategy.js';
 import { HybridSearchStrategy } from './strategies/HybridSearchStrategy.js';
 
+import { AppError } from '../../server/ErrorHandler.js';
 import { ResultFormatter } from './ResultFormatter.js';
 import { TimelineBuilder } from './TimelineBuilder.js';
 import type { TimelineItem, TimelineData } from './TimelineBuilder.js';
@@ -99,15 +100,29 @@ export class SearchOrchestrator {
 
       // Chroma failed - fall back to SQLite for filter-only
       logger.debug('SEARCH', 'Orchestrator: Chroma failed, falling back to SQLite', {});
-      const fallbackResult = await this.sqliteStrategy.search({
-        ...options,
-        query: undefined // Remove query for SQLite fallback
-      });
+      try {
+        const fallbackResult = await this.sqliteStrategy.search({
+          ...options,
+          query: undefined // Remove query for SQLite fallback
+        });
 
-      return {
-        ...fallbackResult,
-        fellBack: true
-      };
+        return {
+          ...fallbackResult,
+          fellBack: true
+        };
+      } catch (error) {
+        if (error instanceof AppError) {
+          // Query-only request has no filters to fall back on — a Chroma
+          // outage must not surface as a validation error
+          return {
+            results: { observations: [], sessions: [], prompts: [] },
+            usedChroma: false,
+            fellBack: true,
+            strategy: 'chroma'
+          };
+        }
+        throw error;
+      }
     }
 
     // PATH 3: No Chroma available
@@ -177,6 +192,42 @@ export class SearchOrchestrator {
     // Fallback to SQLite
     const results = this.sqliteStrategy.findByFile(filePath, options);
     return { ...results, usedChroma: false };
+  }
+
+  /**
+   * Semantic search restricted to an observation type (e.g. decisions with query text)
+   */
+  async searchByType(query: string, type: string, args: any): Promise<StrategySearchResult> {
+    const options = this.normalizeParams(args);
+
+    if (this.hybridStrategy) {
+      return await this.hybridStrategy.searchByType(query, type, options);
+    }
+
+    // Fallback to SQLite
+    const results = this.sqliteStrategy.findByType(type, options);
+    return {
+      results: { observations: results, sessions: [], prompts: [] },
+      usedChroma: false,
+      fellBack: false,
+      strategy: 'sqlite'
+    };
+  }
+
+  /**
+   * Rank an already-filtered candidate id set by semantic relevance to a query.
+   * Returns [] when Chroma is unavailable or has no overlapping matches —
+   * callers fall back to their own metadata-ordered results.
+   */
+  async rankObservations(
+    candidateIds: number[],
+    rankQuery: string,
+    hydrateLimit: number
+  ): Promise<ObservationSearchResult[]> {
+    if (!this.hybridStrategy) {
+      return [];
+    }
+    return await this.hybridStrategy.rankObservations(candidateIds, rankQuery, hydrateLimit);
   }
 
   /**

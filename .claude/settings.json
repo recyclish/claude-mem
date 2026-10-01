@@ -1,6 +1,9 @@
 {
   "env": {},
   "permissions": {
+    "allow": [
+      "mcp__Supabase__execute_sql"
+    ],
     "deny": [
       "Read(./package-lock.json)",
       "Read(./node_modules/**)",

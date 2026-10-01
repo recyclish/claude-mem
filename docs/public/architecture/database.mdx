@@ -1,11 +1,11 @@
 ---
 title: "Database Architecture"
-description: "SQLite schema, FTS5 search, and data storage"
+description: "SQLite schema, search, and data storage"
 ---
 
 # Database Architecture
 
-Claude-Mem uses SQLite 3 with the bun:sqlite native module for persistent storage and FTS5 for full-text search.
+Claude-Mem uses SQLite 3 with the bun:sqlite native module for persistent storage, mirrored to ChromaDB for semantic (vector) search.
 
 ## Database Location
 
@@ -132,7 +132,7 @@ CREATE TABLE session_summaries (
 
 ### 4. user_prompts
 
-Raw user prompts with FTS5 search (as of v4.2.0).
+Raw user prompts (as of v4.2.0).
 
 ```sql
 CREATE TABLE user_prompts (
@@ -160,94 +160,28 @@ CREATE TABLE user_prompts (
 - **memories**: Legacy compressed memory chunks (v3.x)
 - **overviews**: Legacy session summaries (v3.x)
 
-## FTS5 Full-Text Search
+## Search
 
-SQLite FTS5 (Full-Text Search) virtual tables enable fast full-text search across observations, summaries, and user prompts.
+Search runs on two engines, coordinated by the worker's SearchOrchestrator:
 
-### FTS5 Virtual Tables
+- **Semantic search (query text)**: observations, summaries, and user prompts are
+  mirrored to ChromaDB as vector embeddings (via `ChromaSync`). Query text is
+  matched by meaning, results are filtered by date range or a 90-day recency
+  window, then hydrated from SQLite by id with any structured filters applied.
+- **Structured filtering (no query text)**: `SessionSearch` runs direct SQLite
+  queries over indexed columns and JSON fields — project, type, date range,
+  concepts, and file paths.
 
-#### observations_fts
-
-```sql
-CREATE VIRTUAL TABLE observations_fts USING fts5(
-  title,
-  subtitle,
-  narrative,
-  text,
-  facts,
-  concepts,
-  content='observations',
-  content_rowid='id'
-);
-```
-
-#### session_summaries_fts
-
-```sql
-CREATE VIRTUAL TABLE session_summaries_fts USING fts5(
-  request,
-  investigated,
-  learned,
-  completed,
-  next_steps,
-  notes,
-  content='session_summaries',
-  content_rowid='id'
-);
-```
-
-#### user_prompts_fts
-
-```sql
-CREATE VIRTUAL TABLE user_prompts_fts USING fts5(
-  prompt_text,
-  content='user_prompts',
-  content_rowid='id'
-);
-```
-
-### Automatic Synchronization
-
-FTS5 tables stay in sync via triggers:
-
-```sql
--- Insert trigger example
-CREATE TRIGGER observations_ai AFTER INSERT ON observations BEGIN
-  INSERT INTO observations_fts(rowid, title, subtitle, narrative, text, facts, concepts)
-  VALUES (new.id, new.title, new.subtitle, new.narrative, new.text, new.facts, new.concepts);
-END;
-
--- Update trigger example
-CREATE TRIGGER observations_au AFTER UPDATE ON observations BEGIN
-  INSERT INTO observations_fts(observations_fts, rowid, title, subtitle, narrative, text, facts, concepts)
-  VALUES('delete', old.id, old.title, old.subtitle, old.narrative, old.text, old.facts, old.concepts);
-  INSERT INTO observations_fts(rowid, title, subtitle, narrative, text, facts, concepts)
-  VALUES (new.id, new.title, new.subtitle, new.narrative, new.text, new.facts, new.concepts);
-END;
-
--- Delete trigger example
-CREATE TRIGGER observations_ad AFTER DELETE ON observations BEGIN
-  INSERT INTO observations_fts(observations_fts, rowid, title, subtitle, narrative, text, facts, concepts)
-  VALUES('delete', old.id, old.title, old.subtitle, old.narrative, old.text, old.facts, old.concepts);
-END;
-```
-
-### FTS5 Query Syntax
-
-FTS5 supports rich query syntax:
-
-- **Simple**: `"error handling"`
-- **AND**: `"error" AND "handling"`
-- **OR**: `"bug" OR "fix"`
-- **NOT**: `"bug" NOT "feature"`
-- **Phrase**: `"'exact phrase'"`
-- **Column**: `title:"authentication"`
+Legacy FTS5 virtual tables (`observations_fts`, `session_summaries_fts`,
+`user_prompts_fts`) from older versions are no longer used; migrations drop
+them automatically.
 
 ### Security
 
-As of v4.2.3, all FTS5 queries are properly escaped to prevent SQL injection:
-- Double quotes are escaped: `query.replace(/"/g, '""')`
-- Comprehensive test suite with 332 injection attack tests
+All structured filters are bound as SQLite parameters — user input is never
+interpolated into SQL text — and query text is only ever passed to ChromaDB
+as an embedding input, not executed. A comprehensive injection test suite
+covers special characters, SQL keywords, quote escaping, and boolean operators.
 
 ## Database Classes
 
@@ -269,14 +203,15 @@ CRUD operations for sessions, observations, summaries, and user prompts.
 
 ### SessionSearch
 
-FTS5 full-text search with 8 specialized search methods.
+Filter-only structured queries with specialized search methods (semantic
+search on query text is handled by ChromaDB, not this class).
 
 **Location**: `src/services/sqlite/SessionSearch.ts`
 
 **Methods**:
-- `searchObservations()` - Full-text search across observations
-- `searchSessions()` - Full-text search across summaries
-- `searchUserPrompts()` - Full-text search across user prompts
+- `searchObservations()` - Structured filtering across observations
+- `searchSessions()` - Structured filtering across summaries
+- `searchUserPrompts()` - Structured filtering across user prompts
 - `findByConcept()` - Find by concept tags
 - `findByFile()` - Find by file references
 - `findByType()` - Find by observation type
@@ -285,7 +220,7 @@ FTS5 full-text search with 8 specialized search methods.
 
 ## Migrations
 
-Database schema is managed via migrations in `src/services/sqlite/migrations.ts`.
+Database schema is managed by the `MigrationRunner` in `src/services/sqlite/migrations/runner.ts` (mirrored in `SessionStore` for bundled artifacts). Migrations are idempotent and run on every startup.
 
 **Migration History**:
 - Migration 001: Initial schema (sessions, memories, overviews, diagnostics, transcript_events)
@@ -293,13 +228,13 @@ Database schema is managed via migrations in `src/services/sqlite/migrations.ts`
 - Migration 003: SDK sessions and observations
 - Migration 004: Session summaries
 - Migration 005: Multi-prompt sessions (prompt_counter, prompt_number)
-- Migration 006: FTS5 virtual tables and triggers
+- Migration 006: FTS5 virtual tables and triggers (legacy — since removed)
 - Migration 007-010: Various improvements and user prompts table
 
 ## Performance Considerations
 
 - **Indexes**: All foreign keys and frequently queried columns are indexed
-- **FTS5**: Full-text search is significantly faster than LIKE queries
+- **Chroma hydration**: semantic results are hydrated from SQLite by primary key
 - **Triggers**: Automatic synchronization has minimal overhead
 - **Connection Pooling**: bun:sqlite reuses connections efficiently
 - **Synchronous API**: bun:sqlite uses synchronous API for better performance

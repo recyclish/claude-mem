@@ -168,7 +168,7 @@ Claude-Mem uses lifecycle hook scripts across 5 lifecycle events. SessionStart r
 **What it does:**
 1. Reads user prompt and session ID from stdin
 2. Creates new session record in SQLite
-3. Saves raw user prompt for full-text search (v4.2.0+)
+3. Saves raw user prompt for later search (v4.2.0+)
 4. Starts Bun worker service if not running
 5. Returns immediately (non-blocking)
 
@@ -714,7 +714,7 @@ claude --debug
 
 **Schema optimizations:**
 - Indexes on `project`, `created_at_epoch`, `claude_session_id`
-- FTS5 virtual tables for full-text search
+- ChromaDB mirror for semantic search on query text
 - WAL mode for concurrent reads/writes
 
 **Query patterns:**
@@ -730,10 +730,10 @@ SELECT * FROM sdk_sessions
 WHERE claude_session_id = ?
 LIMIT 1
 
--- Fast: FTS5 full-text search
-SELECT * FROM observations_fts
-WHERE observations_fts MATCH ?
-ORDER BY rank
+-- Fast: hydrate Chroma-ranked ids by primary key
+SELECT * FROM observations
+WHERE id IN (?, ?, ?)
+ORDER BY created_at_epoch DESC
 LIMIT 20
 ```
 

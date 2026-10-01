@@ -7,9 +7,16 @@
  * - SessionManager.getSession returns undefined for uninitialized sessions
  * - SessionManager.getSession returns session after initialization
  */
-import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn, mock } from 'bun:test';
 import { homedir } from 'os';
 import { join } from 'path';
+
+// Bun's mock.module() is process-global and has no built-in undo: a module mocked
+// here stays mocked for every test file loaded afterwards in the same run (#1299).
+// Capture the real exports by value first, then restore them in afterAll so this
+// mock stays scoped to this file.
+const realProjectFilter = await import('../../src/utils/project-filter.js');
+const realIsProjectExcluded = realProjectFilter.isProjectExcluded;
 
 // Mock modules that cause import chain issues - MUST be before handler imports
 // paths.ts calls SettingsDefaultsManager.get() at module load time
@@ -41,6 +48,14 @@ mock.module('../../src/shared/worker-utils.js', () => ({
 mock.module('../../src/utils/project-filter.js', () => ({
   isProjectExcluded: () => false,
 }));
+
+// Undo the module mock once this file is done so it doesn't leak into other
+// test files (see the note above the capture block).
+afterAll(() => {
+  mock.module('../../src/utils/project-filter.js', () => ({
+    isProjectExcluded: realIsProjectExcluded,
+  }));
+});
 
 // Now import after mocks
 import { logger } from '../../src/utils/logger.js';

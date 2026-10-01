@@ -1,9 +1,6 @@
 // Export main components
 export {
   ClaudeMemDatabase,
-  DatabaseManager,
-  getDatabase,
-  initializeDatabase,
   MigrationRunner
 } from './Database.js';
 
@@ -11,14 +8,11 @@ export {
 // @deprecated Use modular functions from Database.ts instead
 export { SessionStore } from './SessionStore.js';
 
-// Export session search (FTS5 and structured search)
+// Export session search (structured filter queries; vector search lives in ChromaDB)
 export { SessionSearch } from './SessionSearch.js';
 
 // Export types
 export * from './types.js';
-
-// Export migrations
-export { migrations } from './migrations.js';
 
 // Export transactions
 export { storeObservations, storeObservationsAndMarkComplete } from './transactions.js';
